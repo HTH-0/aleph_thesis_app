@@ -29,14 +29,22 @@ const CONFIG = {
 };
 
 // 장소 종류별 소리. group이 서로 다른 소리를 우선 골라 음색이 겹치지 않게 한다.
-// mode: "loop"는 계속 재생, "pulse"는 interval(ms)마다 clip(초)만큼 재생한다.
+// mode: "loop"는 loopStart~loopEnd(초)를 계속 반복, "pulse"는 interval(ms)마다 clip(초)만큼 재생한다.
+// gain은 파일마다 평균 음량(RMS)을 재서 약 0.06~0.08로 맞춘 값이다 (2026-10-15 측정).
+// lowpass(Hz)는 전체 필터(SOUND_LOWPASS_HZ) 외에 그 소리만 고음을 더 깎을 때 쓴다.
 const SOUND_TYPES = {
-  stadium:      { label: "경기장", sound: "함성", file: "sounds/stadium.mp3", group: "crowd", mode: "loop", gain: 0.45, color: "#c0504d" },
-  construction: { label: "공사장", sound: "착암기", file: "sounds/construction.mp3", group: "hit", mode: "pulse", interval: 3100, clip: 2.2, gain: 0.6, color: "#d08a2e" },
-  church:       { label: "교회·성당", sound: "종소리", file: "sounds/church.mp3", group: "bell", mode: "pulse", interval: 4700, clip: 4, gain: 0.8, color: "#4f6fa8" },
-  temple:       { label: "절", sound: "범종", file: "sounds/temple.mp3", group: "bell", mode: "pulse", interval: 6300, clip: 6, gain: 1.0, color: "#7d5ba6" },
-  fountain:     { label: "분수대", sound: "물소리", file: "sounds/fountain.mp3", group: "water", mode: "loop", gain: 0.55, color: "#3b9aa8" },
-  playground:   { label: "놀이터", sound: "아이들 소리", file: "sounds/playground.mp3", group: "crowd", mode: "loop", gain: 0.45, color: "#5a9a4a" },
+  // 17.5초, RMS 0.144. 앞 2초는 점점 커지는 구간이라 반복에서 뺀다
+  stadium:      { label: "경기장", sound: "함성", file: "sounds/stadium.mp3", group: "crowd", mode: "loop", loopStart: 2.5, loopEnd: 17, gain: 0.5, color: "#c0504d" },
+  // 9.6초 동안 계속 울리는 착암기라서 1.2초만 끊어 "따다다" 하고 멈추게 한다
+  construction: { label: "공사장", sound: "착암기", file: "sounds/construction.mp3", group: "hit", mode: "pulse", interval: 3100, clip: 1.2, gain: 0.4, lowpass: 3500, color: "#d08a2e" },
+  // 4.8초, 한 번 울리고 잦아드는 종
+  church:       { label: "교회·성당", sound: "종소리", file: "sounds/church.mp3", group: "bell", mode: "pulse", interval: 4700, clip: 4.5, gain: 1.4, color: "#4f6fa8" },
+  // 8.1초, 길게 울리는 낮은 종
+  temple:       { label: "절", sound: "범종", file: "sounds/temple.mp3", group: "bell", mode: "pulse", interval: 7300, clip: 7, gain: 0.8, color: "#7d5ba6" },
+  // 18.5초, RMS 0.026으로 작고 "쉬" 하는 고음이 많아서 키우면서 고음을 많이 깎는다
+  fountain:     { label: "분수대", sound: "물소리", file: "sounds/fountain.mp3", group: "water", mode: "loop", loopStart: 0.5, loopEnd: 18, gain: 2.6, lowpass: 2200, color: "#3b9aa8" },
+  // 11.4초, 아이들 고함이 순간적으로 커서(최대 0.99) 고음을 깎는다
+  playground:   { label: "놀이터", sound: "아이들 소리", file: "sounds/playground.mp3", group: "crowd", mode: "loop", loopStart: 0.5, loopEnd: 11, gain: 0.8, lowpass: 3000, color: "#5a9a4a" },
 };
 // 같은 group 안에서 먼저 고를 순서
 const SOUND_PRIORITY = ["stadium", "construction", "church", "temple", "fountain", "playground"];

@@ -86,11 +86,24 @@ class SoundScape {
     src.buffer = buf;
     const g = this.ctx.createGain();
     g.gain.value = spec.gain;
-    src.connect(g);
+    if (spec.lowpass) {
+      const f = this.ctx.createBiquadFilter();
+      f.type = "lowpass";
+      f.frequency.value = spec.lowpass;
+      src.connect(f);
+      f.connect(g);
+    } else {
+      src.connect(g);
+    }
     g.connect(dest);
     if (loop) {
       src.loop = true;
-      src.start(0, Math.random() * buf.duration);
+      // 합성음 버퍼처럼 짧은 경우에는 구간을 자르지 않는다
+      const ls = spec.loopStart && spec.loopStart < buf.duration ? spec.loopStart : 0;
+      const le = spec.loopEnd && spec.loopEnd <= buf.duration && spec.loopEnd > ls ? spec.loopEnd : buf.duration;
+      src.loopStart = ls;
+      src.loopEnd = le;
+      src.start(0, ls + Math.random() * (le - ls));
     } else {
       const clip = Math.min(spec.clip || buf.duration, buf.duration);
       const t = this.ctx.currentTime;
@@ -123,6 +136,9 @@ class SoundScape {
       panner.refDistance = CONFIG.SOUND_REF_DISTANCE;
       panner.maxDistance = CONFIG.SOUND_MAX_DISTANCE;
       panner.rolloffFactor = CONFIG.SOUND_ROLLOFF;
+      // 소리 파일이 스테레오라서, 한 점에서 나는 소리로 들리도록 모노로 합친 뒤 위치를 준다
+      panner.channelCount = 1;
+      panner.channelCountMode = "explicit";
       const pos = { x: l.x, y: 3, z: l.z };
       if (panner.positionX) { panner.positionX.value = pos.x; panner.positionY.value = pos.y; panner.positionZ.value = pos.z; }
       else panner.setPosition(pos.x, pos.y, pos.z);
