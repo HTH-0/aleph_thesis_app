@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>사운드 워크</title>
+  <meta name="description" content="실제 서울 지도 위에서 소리만 듣고 길을 찾는 3D 길찾기 게임" />
+  <link rel="stylesheet" href="industry.css" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <!-- 첫 화면 -->
+  <main id="screen-home" class="screen page">
+    <header class="hero">
+      <p class="kicker">논문을 쓰는 길찾기 게임</p>
+      <h1>사운드 워크</h1>
+      <p class="paper">논문: <cite id="paper-title"></cite></p>
+      <p class="pitch blueprint">
+        길치이든 아니든 누구나 가볍게 길찾기 게임을 즐기고 싶을 때, 이 앱은 논문에서 쓴
+        "서로 다른 음색의 고정 소리 랜드마크" 규칙으로 만든 3D 길찾기 게임을 제공하고,
+        소리가 있을 때와 없을 때의 기록을 논문의 비율 방식으로 비교해 보여 줍니다.
+        <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+      </p>
+    </header>
+
+    <section class="steps">
+      <ol>
+        <li><strong>지역 고르기</strong><span>실제 서울 지도 네 곳 가운데 하나를 고르고, 그 동네의 소리를 미리 들어 봅니다.</span></li>
+        <li><strong>두 판 길찾기</strong><span>한 판은 소리 없이, 한 판은 소리를 들으며 목적지(금색 기둥)를 찾습니다. 순서는 무작위입니다.</span></li>
+        <li><strong>기록 비교</strong><span>소리가 있을 때 얼마나 빨랐는지 보고, 논문 참가자 5명과 비교합니다.</span></li>
+      </ol>
+    </section>
+
+    <section>
+      <h3>1. 지역</h3>
+      <div id="region-list" class="region-list" role="radiogroup" aria-label="지역"></div>
+      <p id="region-error" class="error" hidden></p>
+    </section>
+
+    <section>
+      <h3>2. 이 동네에서 들리는 소리</h3>
+      <p class="text-muted small">헤드폰이나 이어폰을 써 주세요. 소리는 실제 지도에서 그 장소가 있는 곳에서 납니다.</p>
+      <div id="sound-list" class="sound-list"></div>
+      <label class="volume">음량 <input id="volume" type="range" min="0" max="1" step="0.05" value="0.8" /></label>
+    </section>
+
+    <section class="start-row">
+      <button id="btn-start" class="btn btn-primary" disabled>게임 시작</button>
+      <p id="device-warning" class="warning" hidden>이 게임은 키보드와 마우스로 움직입니다. 컴퓨터에서 열어 주세요.</p>
+    </section>
+
+    <section class="controls text-muted small">
+      <h4>조작</h4>
+      <p>W A S D 또는 방향키로 이동, 마우스로 시선, Shift로 달리기, Esc로 일시정지(포기 가능).</p>
+    </section>
+
+    <footer class="credits text-muted small">
+      <p>지도 데이터 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> (ODbL).
+        소리 출처는 <a href="#credits" id="link-credits">여기</a>에 있습니다.</p>
+      <div id="credits" hidden>
+        <p>소리 파일: Pixabay Content License</p>
+        <ul id="credit-list"></ul>
+      </div>
+    </footer>
+  </main>
+
+  <!-- 출발 전 지도 보기 -->
+  <main id="screen-briefing" class="screen page" hidden>
+    <p class="kicker" id="brief-kicker"></p>
+    <h2 id="brief-title"></h2>
+    <p id="brief-desc"></p>
+    <div class="brief-grid">
+      <canvas id="brief-map" width="600" height="600" aria-label="출발 전 지도"></canvas>
+      <div>
+        <h4>지도 보는 법</h4>
+        <ul class="legend">
+          <li><span class="dot start"></span>출발</li>
+          <li><span class="dot goal"></span>목적지 (금색 기둥)</li>
+          <li><span class="dot road"></span>걸을 수 있는 길</li>
+        </ul>
+        <div id="brief-sounds"></div>
+        <p class="text-muted small">출발하면 지도는 사라집니다. 위쪽이 북쪽입니다.</p>
+        <button id="btn-go" class="btn btn-primary">기억했어요, 출발</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- 게임 -->
+  <div id="screen-play" class="screen" hidden>
+    <canvas id="game-canvas"></canvas>
+    <div class="play-top">
+      <span id="play-label" class="tag tag-accent"></span>
+      <span id="play-timer" class="timer">5:00</span>
+    </div>
+    <pre id="play-hud" class="hud" hidden></pre>
+    <div id="play-overlay" class="overlay hidden">
+      <div class="overlay-box">
+        <p data-msg></p>
+        <button data-giveup class="btn btn-secondary" hidden>이번 판 포기하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 결과 -->
+  <main id="screen-result" class="screen page" hidden>
+    <p class="kicker">결과</p>
+    <h2 id="result-headline"></h2>
+    <table class="table" id="result-table">
+      <thead><tr><th>판</th><th>소리</th><th>걸린 시간</th><th>걸은 거리 / 최단 거리</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="result-note" class="text-muted small"></p>
+
+    <h3>논문 참가자 5명과 비교</h3>
+    <p class="small">시간비 = 소리가 있을 때 걸린 시간 ÷ 소리가 없을 때 걸린 시간. 1보다 작으면 소리가 있을 때 더 빨랐다는 뜻입니다 (논문 2.5, 3.1).</p>
+    <div id="result-chart"></div>
+    <p class="text-muted small">논문에서도 5명 중 4명은 소리 3개일 때 더 빨랐지만 1명은 더 느렸습니다. 한 번의 기록은 운과 순서의 영향을 크게 받으므로 재미로 봐 주세요.</p>
+
+    <div class="start-row">
+      <button id="btn-again" class="btn btn-primary">같은 지역 다시 하기</button>
+      <button id="btn-home" class="btn btn-secondary">다른 지역 고르기</button>
+    </div>
+  </main>
+
+  <div id="loading" class="loading" hidden><p>지도를 불러오는 중입니다…</p></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/sounds.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

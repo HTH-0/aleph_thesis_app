@@ -1,0 +1,11 @@
+# 작업용 참고 자료 (제출하지 않음)
+참고자료/
+진행.md
+
+node_modules/
+.vercel/
+.env
+.env.*
+
+# 제출용 ZIP 결과물
+dist/
