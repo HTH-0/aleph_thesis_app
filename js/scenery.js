@@ -407,8 +407,8 @@ const SCENERY = (() => {
     }
     const crossings = [];
     const soloNodes = new Map(); // OSM·중간 횡단보도 하나를 두 줄 차도가 함께 쓴다 (신호도 함께 바뀐다)
-    function crosswalk(s, w, rd, node) {
-      const L = 3.2;
+    function crosswalk(s, w, rd, node, Lpaint) {
+      const L = Lpaint || 3.2;
       // 신호등은 지도 안 횡단보도에만 둔다 (지도 밖 배경 도로에는 줄무늬만 그린다)
       if (rd && s.x > -5 && s.z > -5 && s.x < size + 5 && s.z < size + 5) {
         let dx = node.x - s.x, dz = node.z - s.z;
@@ -416,7 +416,7 @@ const SCENERY = (() => {
         dx /= dl; dz /= dl;
         crossings.push({ x: s.x, z: s.z, tx: s.tx, tz: s.tz, w, rd, node, toJ: [dx, dz] });
       }
-      for (let o = -w / 2 + 1; o <= w / 2 - 1; o += 1) {
+      for (let o = -w / 2 + 0.75; o <= w / 2 - 0.75; o += 1) {
         const a = [s.x - s.tz * o - s.tx * L / 2, s.z + s.tx * o - s.tz * L / 2];
         const b = [s.x - s.tz * o + s.tx * L / 2, s.z + s.tx * o + s.tz * L / 2];
         const q = [-s.tz * 0.25, s.tx * 0.25];
@@ -454,10 +454,13 @@ const SCENERY = (() => {
       const perDir = Math.max(1, Math.floor(lanes / 2));
       const laneW = (hw - 0.5) / perDir;
       for (let j = 1; j < perDir; j++) { strip(S, j * laneW, 0.15, ROAD_LAYER + 0.03, WHITE, true); strip(S, -j * laneW, 0.15, ROAD_LAYER + 0.03, WHITE, true); }
+      const usePub = sc.crosswalkSource === "public";
+      const openJ = new Set((sc.junctionsOpen || []).map(keyOf));
+      const ruleOK = (J) => !usePub || openJ.has(keyOf([J.x, J.z]));
       const nearJ = (p) => rd.junctions.reduce((b, J) => (Math.hypot(J.x - p.x, J.z - p.z) < Math.hypot(b.x - p.x, b.z - p.z) ? J : b), rd.junctions[0]);
       for (let i = 1; i < S.length; i++) {
-        if (S[i].ok && !S[i - 1].ok) { const c = nearest(S, S[i].d - 2.4); crosswalk(c, rd.w, rd, nearJ(c).node); }
-        if (!S[i].ok && S[i - 1].ok) { const c = nearest(S, S[i - 1].d + 2.4); crosswalk(c, rd.w, rd, nearJ(c).node); }
+        if (S[i].ok && !S[i - 1].ok) { const c = nearest(S, S[i].d - 2.4), J = nearJ(c); if (ruleOK(J)) crosswalk(c, rd.w, rd, J.node); }
+        if (!S[i].ok && S[i - 1].ok) { const c = nearest(S, S[i - 1].d + 2.4), J = nearJ(c); if (ruleOK(J)) crosswalk(c, rd.w, rd, J.node); }
       }
       // OSM에 등록된 횡단보도(교차로가 아닌 곳): 그 자리에 단독 신호를 둔다
       for (const [cx, cz] of sc.crossings || []) {
@@ -485,6 +488,29 @@ const SCENERY = (() => {
           if (k % 3 === (side > 0 ? 0 : 1)) lampSpots.push({ p: off(sp, side * (hw + 0.5)), yaw: Math.atan2(sp.tx, sp.tz) + (side > 0 ? Math.PI : 0) });
         }
       });
+    }
+
+    // 공공데이터 횡단보도 (서울시·대구시 횡단보도 도형을 지도 생성 때 사각형으로 정리한 것)
+    const allJ = [...nodeUse.values()].filter((e) => e.n >= 2);
+    for (const cw of sc.crosswalks || []) {
+      const sp = { x: cw.x, z: cw.z, tx: cw.tx, tz: cw.tz };
+      if (!cw.wide) { crosswalk(sp, cw.W, null, null, cw.L); continue; }
+      // 가장 가까운 큰 차도와, 30m 안의 교차로(없으면 이 횡단보도만의 신호)를 찾는다
+      let rdBest = null, dBest = Infinity;
+      for (const rd of roads) {
+        if (rd.k !== "car" || rd.w < CONFIG.WIDE_ROAD) continue;
+        for (let i = 0; i < rd.pts.length - 1; i++) {
+          const a = rd.pts[i], b = rd.pts[i + 1], dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz;
+          if (L2 < 0.01) continue;
+          const t = Math.max(0, Math.min(1, ((cw.x - a[0]) * dx + (cw.z - a[1]) * dz) / L2));
+          const d = Math.hypot(a[0] + dx * t - cw.x, a[1] + dz * t - cw.z);
+          if (d < dBest) { dBest = d; rdBest = rd; }
+        }
+      }
+      const jn = allJ.reduce((b, e) => (Math.hypot(e.x - cw.x, e.z - cw.z) < (b ? Math.hypot(b.x - cw.x, b.z - cw.z) : 30) ? e : b), null);
+      const key = "pub:" + Math.round(cw.x) + "," + Math.round(cw.z);
+      const node = jn || soloNodes.get(key) || soloNodes.set(key, { x: cw.x + cw.tx * 6, z: cw.z + cw.tz * 6, id: 200000 + soloNodes.size, w: cw.W, solo: true }).get(key);
+      crosswalk(sp, cw.W, rdBest, node, cw.L);
     }
 
     // 녹지와 광장

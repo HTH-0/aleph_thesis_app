@@ -3,22 +3,29 @@
 // 실행: node tools/build_maps.mjs            (모든 지역)
 //       node tools/build_maps.mjs mokdong    (한 지역만, 여러 개는 쉼표로)
 // 지도 데이터: © OpenStreetMap contributors, ODbL 1.0
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readShapefile, tmFromPrj } from "./shapefile.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(ROOT, "data");
+// 공공데이터 원본 (저장소와 배포물에는 넣지 않는다. 출처는 참고자료/공공데이터/출처.txt)
+const PUBLIC_DIR = join(ROOT, "참고자료", "공공데이터");
+const PUBLIC_CROSSWALKS = {
+  seoul: { file: "seoul_crosswalk/A004_A", source: "서울시 교통안전시설물 횡단보도 정보 (서울 열린데이터광장, 공공누리 제1유형)" },
+  daegu: { file: "daegu_crosswalk/A0043325", source: "대구광역시_횡단보도 (공공데이터포털)" },
+};
 
 // 지역 목록. center는 지도 가운데, half는 지도 한 변의 절반(m).
 export const REGIONS = [
-  { id: "mokdong", name: "목동", desc: "서울 · 목동야구장 · 아파트 단지", center: [37.5310, 126.8790], half: 420 },
-  { id: "jamsil", name: "잠실", desc: "서울 · 잠실종합운동장 · 아파트 단지", center: [37.5110, 127.0800], half: 420 },
-  { id: "gocheok", name: "고척", desc: "서울 · 고척스카이돔 · 구로 골목", center: [37.4985, 126.8660], half: 420 },
-  { id: "worldcup", name: "상암", desc: "서울 · 서울월드컵경기장 · 성산동", center: [37.5675, 126.8990], half: 420 },
-  { id: "banwoldang", name: "반월당", desc: "대구 · 반월당역 · 더현대 대구", center: [35.8655, 128.5934], half: 420 },
-  { id: "dongseongro", name: "동성로", desc: "대구 · 동성로 · 국채보상운동기념공원", center: [35.8690, 128.6010], half: 420 },
-  { id: "seomun", name: "서문시장", desc: "대구 · 서문시장 · 대신동", center: [35.8691, 128.5800], half: 420 },
+  { id: "mokdong", city: "seoul", name: "목동", desc: "서울 · 목동야구장 · 아파트 단지", center: [37.5310, 126.8790], half: 420 },
+  { id: "jamsil", city: "seoul", name: "잠실", desc: "서울 · 잠실종합운동장 · 아파트 단지", center: [37.5110, 127.0800], half: 420 },
+  { id: "gocheok", city: "seoul", name: "고척", desc: "서울 · 고척스카이돔 · 구로 골목", center: [37.4985, 126.8660], half: 420 },
+  { id: "worldcup", city: "seoul", name: "상암", desc: "서울 · 서울월드컵경기장 · 성산동", center: [37.5675, 126.8990], half: 420 },
+  { id: "banwoldang", city: "daegu", name: "반월당", desc: "대구 · 반월당역 · 더현대 대구", center: [35.8655, 128.5934], half: 420 },
+  { id: "dongseongro", city: "daegu", name: "동성로", desc: "대구 · 동성로 · 국채보상운동기념공원", center: [35.8690, 128.6010], half: 420 },
+  { id: "seomun", city: "daegu", name: "서문시장", desc: "대구 · 서문시장 · 대신동", center: [35.8691, 128.5800], half: 420 },
 ];
 
 const CELL = 2; // 격자 한 칸(m)
@@ -132,6 +139,26 @@ function buildingKind(t) {
   if (b === "apartments") return "apartments";
   if (LOW_TYPES.has(b)) return "low";
   return "other";
+}
+
+const pubCache = {};
+function publicCrosswalks(region, toXZ, size) {
+  const src = PUBLIC_CROSSWALKS[region.city];
+  if (!src) return null;
+  const base = join(PUBLIC_DIR, src.file);
+  if (!existsSync(base + ".shp")) { console.warn(`[${region.id}] 공공 횡단보도 파일이 없어 규칙 횡단보도만 씁니다: ${base}.shp`); return null; }
+  if (!pubCache[region.city]) {
+    const shp = readShapefile(base), toLL = tmFromPrj(shp.prj);
+    pubCache[region.city] = shp.features.filter((ft) => ft.geom && ft.geom.rings && ft.geom.rings[0].length >= 3)
+      .map((ft) => ft.geom.rings[0].map(([x, y]) => toLL(x, y)));
+  }
+  const out = [];
+  for (const ring of pubCache[region.city]) {
+    const pts = ring.map(([lon, lat]) => toXZ({ lon, lat }));
+    const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length, cz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+    if (cx > -50 && cz > -50 && cx < size + 50 && cz < size + 50) out.push(pts);
+  }
+  return out;
 }
 
 async function buildRegion(region) {
@@ -291,8 +318,12 @@ out geom;`;
     }
   }
 
-  // 큰 차도: 차로 부분 칸을 막는다. 교차로(두 차도가 꼭짓점을 함께 쓰는 곳)와 그 앞 횡단보도,
-  // OSM에 등록된 횡단보도 자리만 열어 둔다. js/scenery.js가 같은 규칙으로 횡단보도와 울타리를 그린다.
+  // ---------- 큰 차도와 횡단보도 ----------
+  // 큰 차도(폭 WIDE_ROAD 이상)의 차로 칸은 막는다. 건널 수 있는 곳은 다음 순서로 정한다.
+  //  1) 공공데이터 횡단보도(서울시·대구시 횡단보도 도형): 실제 위치와 모양 그대로 연다.
+  //  2) 규칙 횡단보도(교차로, OSM 횡단보도, 220m 넘게 건널 곳이 없는 큰길의 중간):
+  //     공공데이터가 있으면, 실제 횡단보도가 근처에 없고 그 자리를 열어야 걷는 영역이 끊기지 않을 때만 연다.
+  //     공공데이터가 없으면 모두 연다. js/scenery.js는 여기서 정한 횡단보도만 그린다.
   const carway = new Uint8Array(N * N);
   const keyOf = (p) => p[0].toFixed(1) + "," + p[1].toFixed(1);
   const nodeUse = new Map();
@@ -302,11 +333,99 @@ out geom;`;
     e.n++; e.w = Math.max(e.w, rd.w); nodeUse.set(keyOf(p), e);
   }
   const junctions = [...nodeUse.values()].filter((e) => e.n >= 2).map((e) => ({ x: e.p[0], z: e.p[1], r: e.w / 2 + 2.5 }));
-  // 교차로나 횡단보도 없이 220m 넘게 이어지는 큰길에는 중간에 횡단보도를 더한다 (지도가 큰길로 끊기지 않게)
   const MAX_GAP = 220;
   const DUAL = 20; // 상하행이 따로 그려진 큰길(두 줄 차도)도 함께 열리도록, 횡단보도는 이 거리(m) 안의 나란한 차도까지 연다
-  for (const rd of roads) {
-    if (rd.k !== "car" || rd.w < WIDE_ROAD || rd.br) continue;
+  const wideRoads = roads.filter((rd) => rd.k === "car" && rd.w >= WIDE_ROAD && !rd.br);
+
+  // 큰 차도 칸
+  for (const rd of wideRoads) {
+    const hw = rd.w / 2 - 0.2;
+    for (let i = 0; i + 1 < rd.p.length; i++) {
+      const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1];
+      const L = Math.hypot(x2 - x1, z2 - z1);
+      if (L < 0.01) continue;
+      const tx = (x2 - x1) / L, tz = (z2 - z1) / L;
+      const minX = Math.min(x1, x2) - hw, maxX = Math.max(x1, x2) + hw, minZ = Math.min(z1, z2) - hw, maxZ = Math.max(z1, z2) + hw;
+      for (let r = Math.max(0, Math.floor(minZ / CELL)); r <= Math.min(N - 1, Math.floor(maxZ / CELL)); r++) {
+        for (let c = Math.max(0, Math.floor(minX / CELL)); c <= Math.min(N - 1, Math.floor(maxX / CELL)); c++) {
+          const px = c * CELL + CELL / 2, pz = r * CELL + CELL / 2;
+          const t = Math.max(0, Math.min(L, (px - x1) * tx + (pz - z1) * tz));
+          if (Math.hypot(x1 + tx * t - px, z1 + tz * t - pz) <= hw) carway[r * N + c] = 1;
+        }
+      }
+    }
+  }
+
+  // 1) 공공데이터 횡단보도: 가장 가까운 차도의 방향에 맞춘 사각형(길 방향 길이 L, 길을 가로지르는 길이 W)으로 정리한다
+  const pub = publicCrosswalks(region, toXZ, size);
+  const hasPublic = pub !== null;
+  const crosswalks = [];
+  const pubOpen = new Uint8Array(N * N);
+  for (const ring of pub || []) {
+    const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length, cz = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+    let best = null;
+    for (const rd of roads) {
+      if (rd.k !== "car") continue;
+      for (let i = 0; i + 1 < rd.p.length; i++) {
+        const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1], L = Math.hypot(x2 - x1, z2 - z1);
+        if (L < 0.01) continue;
+        const tx = (x2 - x1) / L, tz = (z2 - z1) / L;
+        const t = Math.max(0, Math.min(L, (cx - x1) * tx + (cz - z1) * tz));
+        const d = Math.hypot(x1 + tx * t - cx, z1 + tz * t - cz);
+        if (!best || d - rd.w / 2 < best.d - best.w / 2) best = { d, tx, tz, w: rd.w };
+      }
+    }
+    if (!best || best.d > best.w / 2 + 4) continue; // 차도 위가 아니다 (주차장 안 등)
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const [x, z] of ring) {
+      const a = (x - cx) * best.tx + (z - cz) * best.tz, b = -(x - cx) * best.tz + (z - cz) * best.tx;
+      a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b);
+    }
+    const am = (a0 + a1) / 2, bm = (b0 + b1) / 2;
+    const r1 = (v) => Math.round(v * 10) / 10;
+    crosswalks.push({ x: r1(cx + best.tx * am - best.tz * bm), z: r1(cz + best.tz * am + best.tx * bm), tx: +best.tx.toFixed(4), tz: +best.tz.toFixed(4),
+      L: r1(Math.max(2, a1 - a0)), W: r1(Math.max(3, b1 - b0)), ...(best.w >= WIDE_ROAD ? { wide: 1 } : {}) });
+    if (best.w < WIDE_ROAD) continue;
+    // 도형 안(과 가장자리 0.6m) 칸을 연다
+    const xs = ring.map((p) => p[0]), zs = ring.map((p) => p[1]);
+    for (let r = Math.max(0, Math.floor((Math.min(...zs) - 1) / CELL)); r <= Math.min(N - 1, Math.floor((Math.max(...zs) + 1) / CELL)); r++) {
+      for (let c = Math.max(0, Math.floor((Math.min(...xs) - 1) / CELL)); c <= Math.min(N - 1, Math.floor((Math.max(...xs) + 1) / CELL)); c++) {
+        const px = c * CELL + CELL / 2, pz = r * CELL + CELL / 2;
+        let ins = false, near = false;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const [xi, zi] = ring[i], [xj, zj] = ring[j];
+          if ((zi > pz) !== (zj > pz) && px < ((xj - xi) * (pz - zi)) / (zj - zi) + xi) ins = !ins;
+          const dx = xj - xi, dz = zj - zi, LL = dx * dx + dz * dz;
+          const t = LL > 0 ? Math.max(0, Math.min(1, ((px - xi) * dx + (pz - zi) * dz) / LL)) : 0;
+          if (Math.hypot(xi + dx * t - px, zi + dz * t - pz) < 0.6) near = true;
+        }
+        if (ins || near) pubOpen[r * N + c] = 1;
+      }
+    }
+  }
+  const nearPub = (x, z, r) => crosswalks.some((c) => Math.hypot(c.x - x, c.z - z) < r);
+  // 공공 횡단보도 도형이 차도 폭 일부만 덮거나 두 줄 차도의 한쪽에만 있을 수 있으므로,
+  // 같은 줄 위의 큰 차도 칸(DUAL 안의 나란한 차도 포함)을 횡단보도 폭만큼 함께 연다
+  for (const cw of crosswalks) {
+    if (!cw.wide) continue;
+    const halfL = Math.max(1.5, cw.L / 2);
+    for (const rd of wideRoads) for (let i = 0; i + 1 < rd.p.length; i++) {
+      const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1], L = Math.hypot(x2 - x1, z2 - z1);
+      if (L < 0.01) continue;
+      const tx = (x2 - x1) / L, tz = (z2 - z1) / L;
+      const along = (cw.x - x1) * tx + (cw.z - z1) * tz, across = Math.abs(-(cw.x - x1) * tz + (cw.z - z1) * tx);
+      if (along < -halfL || along > L + halfL || across > rd.w / 2 + DUAL) continue;
+      const ox = x1 + tx * along, oz = z1 + tz * along, hw = rd.w / 2 + 1;
+      for (let r = Math.max(0, Math.floor((oz - hw - halfL) / CELL)); r <= Math.min(N - 1, Math.floor((oz + hw + halfL) / CELL)); r++)
+        for (let c = Math.max(0, Math.floor((ox - hw - halfL) / CELL)); c <= Math.min(N - 1, Math.floor((ox + hw + halfL) / CELL)); c++) {
+          const px = c * CELL + CELL / 2, pz = r * CELL + CELL / 2;
+          if (Math.abs((px - ox) * cw.tx + (pz - oz) * cw.tz) < halfL && Math.abs(-(px - ox) * cw.tz + (pz - oz) * cw.tx) < hw && carway[r * N + c]) pubOpen[r * N + c] = 1;
+        }
+    }
+  }
+
+  // 2) 규칙 횡단보도 후보: 교차로 앞 원, OSM 횡단보도와 중간 횡단보도의 띠
+  for (const rd of wideRoads) {
     const cum = [0];
     for (let i = 1; i < rd.p.length; i++) cum.push(cum[i - 1] + Math.hypot(rd.p[i][0] - rd.p[i - 1][0], rd.p[i][1] - rd.p[i - 1][1]));
     const at = (d) => {
@@ -317,7 +436,8 @@ out geom;`;
     };
     const opens = [0, cum[cum.length - 1]];
     rd.p.forEach((p, i) => { const e = nodeUse.get(keyOf(p)); if (e && e.n >= 2) opens.push(cum[i]); });
-    for (const c of crossings) for (let i = 1; i < rd.p.length; i++) {
+    const pts = [...crossings, ...crosswalks.filter((c) => c.wide).map((c) => [c.x, c.z])];
+    for (const c of pts) for (let i = 1; i < rd.p.length; i++) {
       const [x1, z1] = rd.p[i - 1], [x2, z2] = rd.p[i], L = cum[i] - cum[i - 1];
       if (L < 0.01) continue;
       const along = ((c[0] - x1) * (x2 - x1) + (c[1] - z1) * (z2 - z1)) / L;
@@ -335,37 +455,83 @@ out geom;`;
       }
     }
   }
-
-  const segOpen = []; // 길을 가로질러 열어 둘 띠 (OSM 횡단보도와 중간 횡단보도)
-  for (const rd of roads) {
-    if (rd.k !== "car" || rd.w < WIDE_ROAD || rd.br) continue;
-    const hw = rd.w / 2 - 0.2;
-    for (let i = 0; i + 1 < rd.p.length; i++) {
-      const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1];
-      const L = Math.hypot(x2 - x1, z2 - z1);
+  const cands = [];
+  const cellsWhere = (x, z, R, test) => {
+    const out = [];
+    for (let r = Math.max(0, Math.floor((z - R) / CELL)); r <= Math.min(N - 1, Math.floor((z + R) / CELL)); r++)
+      for (let c = Math.max(0, Math.floor((x - R) / CELL)); c <= Math.min(N - 1, Math.floor((x + R) / CELL)); c++) {
+        const i = r * N + c;
+        if (carway[i] && test(c * CELL + CELL / 2, r * CELL + CELL / 2)) out.push(i);
+      }
+    return out;
+  };
+  for (const j of junctions) {
+    if (hasPublic && nearPub(j.x, j.z, 35)) continue; // 실제 횡단보도가 있는 교차로는 그것을 쓴다
+    const cells = cellsWhere(j.x, j.z, j.r, (px, pz) => Math.hypot(j.x - px, j.z - pz) < j.r);
+    if (cells.length) cands.push({ kind: "junction", p: [j.x, j.z], cells });
+  }
+  for (const cp of crossings) {
+    if (hasPublic && nearPub(cp[0], cp[1], 25)) continue;
+    const strips = [];
+    for (const rd of wideRoads) for (let i = 0; i + 1 < rd.p.length; i++) {
+      const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1], L = Math.hypot(x2 - x1, z2 - z1);
       if (L < 0.01) continue;
       const tx = (x2 - x1) / L, tz = (z2 - z1) / L;
-      for (const [cx, cz] of crossings) {
-        const along = (cx - x1) * tx + (cz - z1) * tz, across = Math.abs(-(cx - x1) * tz + (cz - z1) * tx);
-        if (along >= 0 && along <= L && across < rd.w / 2 + DUAL) segOpen.push({ x: x1 + tx * along, z: z1 + tz * along, tx, tz, hw: rd.w / 2 + 1 });
-      }
-      const minX = Math.min(x1, x2) - hw, maxX = Math.max(x1, x2) + hw, minZ = Math.min(z1, z2) - hw, maxZ = Math.max(z1, z2) + hw;
-      for (let r = Math.max(0, Math.floor(minZ / CELL)); r <= Math.min(N - 1, Math.floor(maxZ / CELL)); r++) {
-        for (let c = Math.max(0, Math.floor(minX / CELL)); c <= Math.min(N - 1, Math.floor(maxX / CELL)); c++) {
-          const px = c * CELL + CELL / 2, pz = r * CELL + CELL / 2;
-          const t = Math.max(0, Math.min(L, (px - x1) * tx + (pz - z1) * tz));
-          if (Math.hypot(x1 + tx * t - px, z1 + tz * t - pz) <= hw) carway[r * N + c] = 1;
+      const along = (cp[0] - x1) * tx + (cp[1] - z1) * tz, across = Math.abs(-(cp[0] - x1) * tz + (cp[1] - z1) * tx);
+      if (along >= 0 && along <= L && across < rd.w / 2 + DUAL) strips.push({ x: x1 + tx * along, z: z1 + tz * along, tx, tz, hw: rd.w / 2 + 1 });
+    }
+    const cells = cellsWhere(cp[0], cp[1], 50, (px, pz) => strips.some((o) => Math.abs((px - o.x) * o.tx + (pz - o.z) * o.tz) < 2 && Math.abs(-(px - o.x) * o.tz + (pz - o.z) * o.tx) < o.hw));
+    if (cells.length) cands.push({ kind: "crossing", p: cp, cells });
+  }
+
+  // 공공 횡단보도 자리를 열고, 규칙 후보는 (공공데이터가 있으면) 끊긴 걷는 영역을 이을 때만 연다
+  for (let i = 0; i < N * N; i++) if (pubOpen[i]) carway[i] = 0;
+  const usedJunctions = [], usedCrossings = [];
+  const applyCand = (cd) => {
+    for (const i of cd.cells) carway[i] = 0;
+    (cd.kind === "junction" ? usedJunctions : usedCrossings).push(cd.p);
+  };
+  if (!hasPublic) cands.forEach(applyCand);
+  else {
+    const base = new Uint8Array(N * N);
+    for (let i = 0; i < N * N; i++) base[i] = area[i] && !building[i] && !carway[i] ? 1 : 0;
+    const lab = new Int32Array(N * N).fill(-1), size0 = [];
+    for (let i = 0; i < N * N; i++) {
+      if (!base[i] || lab[i] !== -1) continue;
+      const k = size0.length, st = [i]; lab[i] = k; let cnt = 0;
+      while (st.length) {
+        const cur = st.pop(); cnt++;
+        const r = Math.floor(cur / N), c = cur % N;
+        for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nr = r + dr, nc = c + dc;
+          if (nr < 0 || nc < 0 || nr >= N || nc >= N) continue;
+          const ni = nr * N + nc;
+          if (base[ni] && lab[ni] === -1) { lab[ni] = k; st.push(ni); }
         }
       }
+      size0.push(cnt);
+    }
+    const parent = size0.map((_, k) => k), total = size0.slice();
+    const find = (k) => (parent[k] === k ? k : (parent[k] = find(parent[k])));
+    for (const cd of cands) {
+      const roots = new Set();
+      for (const i of cd.cells) {
+        const r = Math.floor(i / N), c = i % N;
+        for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nr = r + dr, nc = c + dc;
+          if (nr < 0 || nc < 0 || nr >= N || nc >= N) continue;
+          const l = lab[nr * N + nc];
+          if (l >= 0) roots.add(find(l));
+        }
+      }
+      if ([...roots].filter((k) => total[k] >= 300).length < 2) continue; // 이미 이어진 곳이면 열지 않는다
+      applyCand(cd);
+      const [first, ...rest] = [...roots];
+      for (const k of rest) { parent[k] = first; total[first] += total[k]; }
     }
   }
-  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-    const i = r * N + c;
-    if (!carway[i]) continue;
-    const px = c * CELL + CELL / 2, pz = r * CELL + CELL / 2;
-    if (junctions.some((j) => Math.abs(j.x - px) < j.r && Math.abs(j.z - pz) < j.r && Math.hypot(j.x - px, j.z - pz) < j.r)) carway[i] = 0;
-    else if (segOpen.some((o) => Math.abs((px - o.x) * o.tx + (pz - o.z) * o.tz) < 2 && Math.abs(-(px - o.x) * o.tz + (pz - o.z) * o.tx) < o.hw)) carway[i] = 0;
-  }
+  crossings.length = 0;
+  crossings.push(...usedCrossings);
 
   // 걷는 칸 = 걸을 수 있는 영역이면서 건물 안도, 큰 차도도 아닌 칸. 가장 큰 연결 영역만 남긴다.
   const walk = new Uint8Array(N * N);
@@ -412,12 +578,16 @@ out geom;`;
     attribution: "© OpenStreetMap contributors (ODbL)",
     builtAt: new Date().toISOString().slice(0, 10),
     grid: rows, landmarks: merged,
-    scenery: { buildings, roads, green, trees, crossings },
+    scenery: { buildings, roads, green, trees, crossings, crosswalks, junctionsOpen: usedJunctions, crosswalkSource: hasPublic ? "public" : "rule" },
+    sources: {
+      crosswalks: hasPublic ? PUBLIC_CROSSWALKS[region.city].source : "규칙(교차로·OSM·중간 횡단보도)",
+      crosswalkCounts: { public: crosswalks.length, publicOnWideRoads: crosswalks.filter((c) => c.wide).length, ruleJunctions: usedJunctions.length, ruleCrossings: usedCrossings.length },
+    },
   };
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(join(OUT_DIR, `${region.id}.json`), JSON.stringify(out));
   const counts = merged.reduce((a, l) => ((a[l.type] = (a[l.type] || 0) + 1), a), {});
-  console.log(`[${region.id}] 걷는 칸 ${bestSize}/${N * N}, 건물 ${buildings.length}(층수 기록 ${measured}), 도로 ${roads.length}, 랜드마크`, counts);
+  console.log(`[${region.id}] 걷는 칸 ${bestSize}/${N * N}, 건물 ${buildings.length}(층수 기록 ${measured}), 도로 ${roads.length}, 횡단보도 공공 ${crosswalks.length}(큰길 ${crosswalks.filter((c) => c.wide).length}) + 규칙 교차로 ${usedJunctions.length} + 규칙 띠 ${usedCrossings.length}, 랜드마크`, counts);
 }
 
 const only = process.argv[2] ? process.argv[2].split(",") : null;
@@ -427,5 +597,5 @@ for (const region of REGIONS.filter((r) => !only || only.includes(r.id))) {
 }
 writeFileSync(
   join(OUT_DIR, "regions.json"),
-  JSON.stringify(REGIONS.map(({ id, name, desc }) => ({ id, name, desc })))
+  JSON.stringify(REGIONS.map(({ id, name, desc, city }) => ({ id, name, desc, city })))
 );
