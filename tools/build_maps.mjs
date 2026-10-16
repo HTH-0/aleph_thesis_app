@@ -41,6 +41,7 @@ const ROAD_WIDTH = {
 // 걷는 길(그리지 않고 걷는 영역에만 넣는다)의 폭(m)
 const PATH_WIDTH = { footway: 3, path: 3, cycleway: 3, steps: 3, track: 3, corridor: 3 };
 const SIDEWALK = 4; // 차도 양쪽 보도 폭(m)
+const WIDE_ROAD = 10; // 이 폭(m) 이상인 차도는 걸어서 들어갈 수 없고, 교차로 앞 횡단보도로만 건넌다 (js/config.js의 WIDE_ROAD와 같다)
 const LOW_TYPES = new Set(["house", "detached", "hut", "shed", "garage", "garages", "kiosk", "toilets", "bungalow"]);
 
 function bboxOf(region, extra = 0) {
@@ -157,6 +158,7 @@ async function buildRegion(region) {
   nwr[amenity=fountain](${lbb});
   nwr[leisure=playground](${lbb});
   nwr[amenity=marketplace](${lbb});
+  node[highway=crossing](${bb});
 );
 out geom;`;
   console.log(`[${region.id}] Overpass 요청`);
@@ -214,7 +216,7 @@ out geom;`;
     return pts.length >= 3 ? pts : null;
   };
 
-  const buildings = [], roads = [], green = [], trees = [], landmarks = [];
+  const buildings = [], roads = [], green = [], trees = [], landmarks = [], crossings = [];
   let measured = 0;
   function addBuilding(pts, t, id) {
     const a = Math.abs(ringArea(pts));
@@ -238,7 +240,8 @@ out geom;`;
       if (ROAD_WIDTH[t.highway]) {
         const lanes = num(t.lanes);
         const w = num(t.width) || (lanes ? lanes * 3.3 + 1.5 : ROAD_WIDTH[t.highway]);
-        roads.push({ p: geom, w: Math.round(w * 10) / 10, k: "car", ln: lanes || 0 });
+        const bridge = (t.bridge && t.bridge !== "no") || Number(t.layer) > 0;
+        roads.push({ p: geom, w: Math.round(w * 10) / 10, k: "car", ln: lanes || 0, ...(bridge ? { br: 1 } : {}) });
         stampLine(geom, w / 2 + (w >= 10 ? SIDEWALK : SIDEWALK / 2));
       } else if (t.highway === "pedestrian") {
         const w = num(t.width) || 10;
@@ -268,6 +271,7 @@ out geom;`;
       }
       if (t.natural === "tree_row") for (const p of geom) trees.push(p);
     }
+    if (el.type === "node" && t.highway === "crossing") crossings.push(toXZ(el));
     if (el.type === "node" && t.natural === "tree") {
       const p = toXZ(el);
       if (inside(p[0], p[1], 0)) trees.push(p);
@@ -287,9 +291,85 @@ out geom;`;
     }
   }
 
-  // 걷는 칸 = 걸을 수 있는 영역이면서 건물 안이 아닌 칸. 가장 큰 연결 영역만 남긴다.
+  // 큰 차도: 차로 부분 칸을 막는다. 교차로(두 차도가 꼭짓점을 함께 쓰는 곳)와 그 앞 횡단보도,
+  // OSM에 등록된 횡단보도 자리만 열어 둔다. js/scenery.js가 같은 규칙으로 횡단보도와 울타리를 그린다.
+  const carway = new Uint8Array(N * N);
+  const keyOf = (p) => p[0].toFixed(1) + "," + p[1].toFixed(1);
+  const nodeUse = new Map();
+  // 교차로는 폭 5m 이상 차도끼리 만나는 곳만 센다 (주차장 진입로 같은 서비스 도로는 빼서 횡단보도가 너무 많아지지 않게 한다)
+  for (const rd of roads) if (rd.k === "car" && rd.w >= 5) for (const p of rd.p) {
+    const e = nodeUse.get(keyOf(p)) || { n: 0, w: 0, p };
+    e.n++; e.w = Math.max(e.w, rd.w); nodeUse.set(keyOf(p), e);
+  }
+  const junctions = [...nodeUse.values()].filter((e) => e.n >= 2).map((e) => ({ x: e.p[0], z: e.p[1], r: e.w / 2 + 2.5 }));
+  // 교차로나 횡단보도 없이 220m 넘게 이어지는 큰길에는 중간에 횡단보도를 더한다 (지도가 큰길로 끊기지 않게)
+  const MAX_GAP = 220;
+  const DUAL = 20; // 상하행이 따로 그려진 큰길(두 줄 차도)도 함께 열리도록, 횡단보도는 이 거리(m) 안의 나란한 차도까지 연다
+  for (const rd of roads) {
+    if (rd.k !== "car" || rd.w < WIDE_ROAD || rd.br) continue;
+    const cum = [0];
+    for (let i = 1; i < rd.p.length; i++) cum.push(cum[i - 1] + Math.hypot(rd.p[i][0] - rd.p[i - 1][0], rd.p[i][1] - rd.p[i - 1][1]));
+    const at = (d) => {
+      let i = 1;
+      while (i < rd.p.length - 1 && cum[i] < d) i++;
+      const t = (d - cum[i - 1]) / Math.max(0.01, cum[i] - cum[i - 1]);
+      return [rd.p[i - 1][0] + (rd.p[i][0] - rd.p[i - 1][0]) * t, rd.p[i - 1][1] + (rd.p[i][1] - rd.p[i - 1][1]) * t];
+    };
+    const opens = [0, cum[cum.length - 1]];
+    rd.p.forEach((p, i) => { const e = nodeUse.get(keyOf(p)); if (e && e.n >= 2) opens.push(cum[i]); });
+    for (const c of crossings) for (let i = 1; i < rd.p.length; i++) {
+      const [x1, z1] = rd.p[i - 1], [x2, z2] = rd.p[i], L = cum[i] - cum[i - 1];
+      if (L < 0.01) continue;
+      const along = ((c[0] - x1) * (x2 - x1) + (c[1] - z1) * (z2 - z1)) / L;
+      const across = Math.abs((-(c[0] - x1) * (z2 - z1) + (c[1] - z1) * (x2 - x1)) / L);
+      if (along >= 0 && along <= L && across < rd.w / 2 + DUAL) opens.push(cum[i - 1] + along);
+    }
+    opens.sort((a, b) => a - b);
+    for (let k = 1; k < opens.length; k++) {
+      const gap = opens[k] - opens[k - 1];
+      if (gap <= MAX_GAP) continue;
+      const parts = Math.ceil(gap / (MAX_GAP * 0.9));
+      for (let q = 1; q < parts; q++) {
+        const p = at(opens[k - 1] + (gap * q) / parts);
+        if (inside(p[0], p[1], -20)) crossings.push([Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]);
+      }
+    }
+  }
+
+  const segOpen = []; // 길을 가로질러 열어 둘 띠 (OSM 횡단보도와 중간 횡단보도)
+  for (const rd of roads) {
+    if (rd.k !== "car" || rd.w < WIDE_ROAD || rd.br) continue;
+    const hw = rd.w / 2 - 0.2;
+    for (let i = 0; i + 1 < rd.p.length; i++) {
+      const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1];
+      const L = Math.hypot(x2 - x1, z2 - z1);
+      if (L < 0.01) continue;
+      const tx = (x2 - x1) / L, tz = (z2 - z1) / L;
+      for (const [cx, cz] of crossings) {
+        const along = (cx - x1) * tx + (cz - z1) * tz, across = Math.abs(-(cx - x1) * tz + (cz - z1) * tx);
+        if (along >= 0 && along <= L && across < rd.w / 2 + DUAL) segOpen.push({ x: x1 + tx * along, z: z1 + tz * along, tx, tz, hw: rd.w / 2 + 1 });
+      }
+      const minX = Math.min(x1, x2) - hw, maxX = Math.max(x1, x2) + hw, minZ = Math.min(z1, z2) - hw, maxZ = Math.max(z1, z2) + hw;
+      for (let r = Math.max(0, Math.floor(minZ / CELL)); r <= Math.min(N - 1, Math.floor(maxZ / CELL)); r++) {
+        for (let c = Math.max(0, Math.floor(minX / CELL)); c <= Math.min(N - 1, Math.floor(maxX / CELL)); c++) {
+          const px = c * CELL + CELL / 2, pz = r * CELL + CELL / 2;
+          const t = Math.max(0, Math.min(L, (px - x1) * tx + (pz - z1) * tz));
+          if (Math.hypot(x1 + tx * t - px, z1 + tz * t - pz) <= hw) carway[r * N + c] = 1;
+        }
+      }
+    }
+  }
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const i = r * N + c;
+    if (!carway[i]) continue;
+    const px = c * CELL + CELL / 2, pz = r * CELL + CELL / 2;
+    if (junctions.some((j) => Math.abs(j.x - px) < j.r && Math.abs(j.z - pz) < j.r && Math.hypot(j.x - px, j.z - pz) < j.r)) carway[i] = 0;
+    else if (segOpen.some((o) => Math.abs((px - o.x) * o.tx + (pz - o.z) * o.tz) < 2 && Math.abs(-(px - o.x) * o.tz + (pz - o.z) * o.tx) < o.hw)) carway[i] = 0;
+  }
+
+  // 걷는 칸 = 걸을 수 있는 영역이면서 건물 안도, 큰 차도도 아닌 칸. 가장 큰 연결 영역만 남긴다.
   const walk = new Uint8Array(N * N);
-  for (let i = 0; i < N * N; i++) walk[i] = area[i] && !building[i] ? 1 : 0;
+  for (let i = 0; i < N * N; i++) walk[i] = area[i] && !building[i] && !carway[i] ? 1 : 0;
   const comp = new Int32Array(N * N).fill(-1);
   let best = -1, bestSize = 0, id = 0;
   for (let i = 0; i < N * N; i++) {
@@ -309,13 +389,13 @@ out geom;`;
     id++;
   }
 
-  // 칸 문자: "." 걷는 칸, "#" 건물, " " 그 밖의 막힌 땅
+  // 칸 문자: "." 걷는 칸, "#" 건물, "=" 큰 차도(막힘), " " 그 밖의 막힌 땅
   const rows = [];
   for (let r = 0; r < N; r++) {
     let row = "";
     for (let c = 0; c < N; c++) {
       const i = r * N + c;
-      row += walk[i] && comp[i] === best ? "." : building[i] ? "#" : " ";
+      row += walk[i] && comp[i] === best ? "." : building[i] ? "#" : carway[i] ? "=" : " ";
     }
     rows.push(row);
   }
@@ -332,7 +412,7 @@ out geom;`;
     attribution: "© OpenStreetMap contributors (ODbL)",
     builtAt: new Date().toISOString().slice(0, 10),
     grid: rows, landmarks: merged,
-    scenery: { buildings, roads, green, trees },
+    scenery: { buildings, roads, green, trees, crossings },
   };
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(join(OUT_DIR, `${region.id}.json`), JSON.stringify(out));

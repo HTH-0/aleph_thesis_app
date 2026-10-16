@@ -22,6 +22,7 @@ function runRound(spec, onComplete) {
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.2, CONFIG.FOG_FAR + 400);
   const updateSky = SCENERY.atmosphere(scene, renderer, camera);
   const scenery = SCENERY.build(scene, renderer, map, [route.startPos, route.goalPos]);
+  const traffic = TRAFFIC.create(scene, map, scenery);
 
   // 목적지: 안개 안으로 들어와야 보이는 금색 기둥
   const goal = route.goalPos;
@@ -48,18 +49,19 @@ function runRound(spec, onComplete) {
     if (open.length) yaw = open[Math.floor(Math.random() * open.length)][2];
   }
 
-  // 칸 판정: "." 걷는 칸과 "#" 건물 칸은 통과하고(건물은 실제 벽 모양으로 따로 막는다), 그 밖의 땅은 막는다
+  // 칸 판정: "." 걷는 칸과 "#" 건물 칸은 통과하고(건물은 실제 벽 모양으로 따로 막는다), 큰 차도와 그 밖의 땅은 막는다
   function isBlocked(x, z) {
     const e = scenery.edgeBand; // 지도 가장자리 가림막 앞까지만 갈 수 있다
     if (x < e || z < e || x > map.size - e || z > map.size - e) return true;
     const c = Math.floor(x / map.cell), r = Math.floor(z / map.cell);
     if (r < 0 || c < 0 || r >= map.n || c >= map.n) return true;
-    return map.kind[r * map.n + c] === 0;
+    const k = map.kind[r * map.n + c];
+    return k === 0 || k === 3;
   }
   function canStandAt(x, z) {
     const rr = CONFIG.PLAYER_RADIUS;
     if (isBlocked(x - rr, z) || isBlocked(x + rr, z) || isBlocked(x, z - rr) || isBlocked(x, z + rr)) return false;
-    return !scenery.hits(x, z, rr);
+    return !scenery.hits(x, z, rr) && !traffic.hits(x, z, rr);
   }
 
   const keys = {};
@@ -133,6 +135,9 @@ function runRound(spec, onComplete) {
   if (TEST_MODE) {
     window.__play = {
       exits: scenery.exits,
+      traffic: () => traffic.stats(),
+      crossings: scenery.crossings.map((c) => ({ x: c.x, z: c.z, tx: c.tx, tz: c.tz, w: c.w })),
+      kind: (x, z) => scenery.kindAt(x, z),
       teleport(x, z, y) {
         // 나무나 벽과 겹치면 가까운 빈 자리로 옮긴다
         for (let r = 0; r < 6 && !canStandAt(x, z); r += 0.5) {
@@ -253,6 +258,7 @@ function runRound(spec, onComplete) {
     }
     updateSky();
     scenery.tick(now);
+    traffic.update(dt, now / 1000, camera.position);
     renderer.render(scene, camera);
   }
   raf = requestAnimationFrame(animate);

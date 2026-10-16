@@ -13,13 +13,14 @@ async function loadRegion(id) {
 
   const n = d.n;
   const walk = new Uint8Array(n * n);
-  const kind = new Uint8Array(n * n); // 0 막힌 땅, 1 건물, 2 걷는 칸
+  const kind = new Uint8Array(n * n); // 0 막힌 땅, 1 건물, 2 걷는 칸, 3 큰 차도(막힘)
   for (let r = 0; r < n; r++) {
     const row = d.grid[r];
     for (let c = 0; c < n; c++) {
       const ch = row[c];
       if (ch === ".") { walk[r * n + c] = 1; kind[r * n + c] = 2; }
       else if (ch === "#") kind[r * n + c] = 1;
+      else if (ch === "=") kind[r * n + c] = 3;
     }
   }
   const m = CONFIG.LANDMARK_MARGIN;

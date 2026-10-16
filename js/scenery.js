@@ -140,6 +140,20 @@ const SCENERY = (() => {
         g.fillStyle = "#1d1d1d";
         for (let x = -h; x < w + h; x += 64) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 32, h); g.lineTo(x + 32 + h, 0); g.lineTo(x + h, 0); g.fill(); }
       }, a),
+      // 보행자 방호 울타리: 2m × 1m. 기둥·가로대만 그리고 나머지는 투명하게 둔다
+      fence: (() => {
+        const t = canvasTex(256, 128, (g, w, h) => {
+          g.clearRect(0, 0, w, h);
+          g.fillStyle = "#d9dde0";
+          g.fillRect(0, 4, w, 10); g.fillRect(0, 60, w, 7); g.fillRect(0, 112, w, 8);
+          g.fillRect(0, 0, 10, h); g.fillRect(w - 10, 0, 10, h);
+          g.fillStyle = "#c3c9ce";
+          for (let x = 24; x < w - 10; x += 18) g.fillRect(x, 14, 4, 98);
+          g.fillStyle = "#2e8b57"; g.fillRect(90, 22, 76, 30); // 가운데 초록 표지판
+          g.fillStyle = "#f4f4f0"; g.fillRect(104, 32, 48, 10);
+        }, a);
+        return t;
+      })(),
       // 라바콘: 주황 몸통에 흰 반사띠 두 줄 (위가 캔버스 위쪽)
       cone: canvasTex(16, 128, (g, w, h) => {
         g.fillStyle = "#f2611d"; g.fillRect(0, 0, w, h);
@@ -351,13 +365,14 @@ const SCENERY = (() => {
     const roads = sc.roads.map((r) => ({ ...r, pts: r.p }));
     const nodeUse = new Map();
     const keyOf = (p) => p[0].toFixed(1) + "," + p[1].toFixed(1);
-    for (const rd of roads) if (rd.k === "car") for (const p of rd.pts) {
-      const k = keyOf(p), e = nodeUse.get(k) || { n: 0, w: 0 };
+    // 교차로: 폭 5m 이상 차도끼리 만나는 꼭짓점 (tools/build_maps.mjs와 같은 규칙)
+    for (const rd of roads) if (rd.k === "car" && rd.w >= 5) for (const p of rd.pts) {
+      const k = keyOf(p), e = nodeUse.get(k) || { n: 0, w: 0, x: p[0], z: p[1], id: nodeUse.size };
       e.n++; e.w = Math.max(e.w, rd.w); nodeUse.set(k, e);
     }
     for (const rd of roads) {
       rd.junctions = rd.pts.filter((p) => { const e = nodeUse.get(keyOf(p)); return e && e.n >= 2; })
-        .map((p) => ({ x: p[0], z: p[1], trim: nodeUse.get(keyOf(p)).w / 2 + 2.5 }));
+        .map((p) => { const node = nodeUse.get(keyOf(p)); return { x: p[0], z: p[1], trim: node.w / 2 + 2.5, node }; });
     }
     function sample(rd, step) {
       const out = [];
@@ -378,7 +393,8 @@ const SCENERY = (() => {
       return out;
     }
     const off = (s, o) => [s.x - s.tz * o, s.z + s.tx * o];
-    const BROAD = buf(), BPLAZA = buf(), BMARK = buf(), BGREEN = buf();
+    const BROAD = buf(), BPLAZA = buf(), BMARK = buf(), BGREEN = buf(), BFENCE = buf();
+    const kindAt = (x, z) => { const c = Math.floor(x / cell), r = Math.floor(z / cell); return r < 0 || c < 0 || r >= n || c >= n ? -1 : map.kind[r * n + c]; };
     const WHITE = lin("#e9e7e1"), YELLOW = lin("#e8b828"), CURB = lin("#cfcbc3");
     const treeSpots = [], lampSpots = [];
     function strip(S, o, width, y, col, dash) {
@@ -389,8 +405,17 @@ const SCENERY = (() => {
         quadUp(BMARK, off(s, o - width / 2), off(t, o - width / 2), off(t, o + width / 2), off(s, o + width / 2), y, 1, col);
       }
     }
-    function crosswalk(s, w) {
+    const crossings = [];
+    const soloNodes = new Map(); // OSM·중간 횡단보도 하나를 두 줄 차도가 함께 쓴다 (신호도 함께 바뀐다)
+    function crosswalk(s, w, rd, node) {
       const L = 3.2;
+      // 신호등은 지도 안 횡단보도에만 둔다 (지도 밖 배경 도로에는 줄무늬만 그린다)
+      if (rd && s.x > -5 && s.z > -5 && s.x < size + 5 && s.z < size + 5) {
+        let dx = node.x - s.x, dz = node.z - s.z;
+        const dl = Math.hypot(dx, dz) || 1;
+        dx /= dl; dz /= dl;
+        crossings.push({ x: s.x, z: s.z, tx: s.tx, tz: s.tz, w, rd, node, toJ: [dx, dz] });
+      }
       for (let o = -w / 2 + 1; o <= w / 2 - 1; o += 1) {
         const a = [s.x - s.tz * o - s.tx * L / 2, s.z + s.tx * o - s.tz * L / 2];
         const b = [s.x - s.tz * o + s.tx * L / 2, s.z + s.tx * o + s.tz * L / 2];
@@ -429,9 +454,29 @@ const SCENERY = (() => {
       const perDir = Math.max(1, Math.floor(lanes / 2));
       const laneW = (hw - 0.5) / perDir;
       for (let j = 1; j < perDir; j++) { strip(S, j * laneW, 0.15, ROAD_LAYER + 0.03, WHITE, true); strip(S, -j * laneW, 0.15, ROAD_LAYER + 0.03, WHITE, true); }
+      const nearJ = (p) => rd.junctions.reduce((b, J) => (Math.hypot(J.x - p.x, J.z - p.z) < Math.hypot(b.x - p.x, b.z - p.z) ? J : b), rd.junctions[0]);
       for (let i = 1; i < S.length; i++) {
-        if (S[i].ok && !S[i - 1].ok) crosswalk(nearest(S, S[i].d - 2.4), rd.w);
-        if (!S[i].ok && S[i - 1].ok) crosswalk(nearest(S, S[i - 1].d + 2.4), rd.w);
+        if (S[i].ok && !S[i - 1].ok) { const c = nearest(S, S[i].d - 2.4); crosswalk(c, rd.w, rd, nearJ(c).node); }
+        if (!S[i].ok && S[i - 1].ok) { const c = nearest(S, S[i - 1].d + 2.4); crosswalk(c, rd.w, rd, nearJ(c).node); }
+      }
+      // OSM에 등록된 횡단보도(교차로가 아닌 곳): 그 자리에 단독 신호를 둔다
+      for (const [cx, cz] of sc.crossings || []) {
+        const c = S.reduce((b, q) => (Math.hypot(q.x - cx, q.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? q : b), S[0]);
+        if (!c || !c.ok || Math.hypot(c.x - cx, c.z - cz) > hw + 20) continue; // 두 줄 차도의 다른 쪽도 같은 횡단보도로 연다
+        const key = cx + "," + cz;
+        const node = soloNodes.get(key) || soloNodes.set(key, { x: c.x + c.tx * 6, z: c.z + c.tz * 6, id: 100000 + soloNodes.size, w: rd.w, solo: true }).get(key);
+        crosswalk(c, rd.w, rd, node);
+      }
+      // 보행자 방호 울타리: 막힌 차도 칸과 보도 사이에 세우고, 횡단보도와 교차로 자리는 비운다
+      for (const side of [-1, 1]) {
+        const blockedAt = (q) => { const p = off(q, side * (hw - 0.6)); return kindAt(p[0], p[1]) === 3; };
+        for (let i = 0; i < S.length - 1; i++) {
+          const q0 = S[i], q1 = S[i + 1];
+          if (!blockedAt(q0) || !blockedAt(q1)) continue;
+          let a = off(q0, side * (hw + 0.15)), b = off(q1, side * (hw + 0.15));
+          if (side < 0) [a, b] = [b, a];
+          vquad(BFENCE, a, b, 0.02, 1.0, 0, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, ONE);
+        }
       }
       sample(rd, 9).forEach((sp, k) => {
         if (!sp.ok) return;
@@ -601,6 +646,100 @@ const SCENERY = (() => {
     }
     coneMesh.castShadow = baseMesh.castShadow = true;
     group.add(coneMesh, baseMesh, warnMesh);
+    group.add(toMesh(BFENCE, std(T.fence, { side: THREE.DoubleSide, alphaTest: 0.5, roughness: 0.6 }), true));
+
+    // ---------- 신호등 ----------
+    // 교차로마다 두 방향 묶음이 번갈아 통행한다. 차량 신호: 초록 → 노랑 → 빨강.
+    // 보행 신호: 그 길의 차량이 멈춘 동안 초록, 끝나기 전 몇 초는 깜빡임.
+    const G = CONFIG.SIGNAL_GREEN, Y = CONFIG.SIGNAL_YELLOW, T2 = (G + Y) * 2;
+    for (const c of crossings) {
+      const nd = c.node;
+      if (nd.ref === undefined) nd.ref = Math.atan2(c.toJ[1], c.toJ[0]);
+      const a = Math.atan2(c.toJ[1], c.toJ[0]);
+      c.phase = Math.abs(Math.cos(a - nd.ref)) >= 0.707 ? 0 : 1;
+      if (nd.offset === undefined) nd.offset = hash(nd.id * 3.17) * T2;
+    }
+    function signalOf(c, t) {
+      const u = (t + c.node.offset) % T2;
+      const active = u < G + Y ? 0 : 1, within = u - active * (G + Y);
+      const car = active === c.phase ? (within < G ? "green" : "yellow") : "red";
+      const ped = active !== c.phase && within < G ? (within > G - CONFIG.PED_FLASH ? "flash" : "green") : "red";
+      return { car, ped };
+    }
+    const right = (d) => [-d[1], d[0]]; // 진행 방향의 오른쪽
+    const pedHeads = [], carHeads = [];
+    for (const c of crossings) {
+      const hw = c.w / 2, n = [-c.tz, c.tx];
+      // 보행 신호등: 횡단보도 양 끝 보도 위, 건너편을 바라본다
+      for (const side of [-1, 1]) {
+        const x = c.x + n[0] * side * (hw + 0.9), z = c.z + n[1] * side * (hw + 0.9);
+        if (kindAt(x, z) !== 2) continue;
+        pedHeads.push({ c, x, z, yaw: Math.atan2(-n[0] * side, -n[1] * side) });
+      }
+      // 차량 신호등: 교차로로 들어오는 차가 보도록, 진행 방향 오른쪽 보도에 기둥을 세우고 팔을 길 위로 뻗는다
+      const r = right(c.toJ);
+      const px = c.x + r[0] * (hw + 1.0) - c.toJ[0] * 2.5, pz = c.z + r[1] * (hw + 1.0) - c.toJ[1] * 2.5;
+      if (kindAt(px, pz) === 2) carHeads.push({ c, x: px, z: pz, yaw: Math.atan2(c.toJ[0], c.toJ[1]), reach: Math.min(hw * 0.75, 7) });
+    }
+    const darkMat = new THREE.MeshStandardMaterial({ color: lin("#2b2e31"), roughness: 0.7 });
+    const lampMats = (n) => new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+    const m4 = new THREE.Object3D();
+    const inst = (geo, mat, list) => { const im = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length)); im.count = list.length; return im; };
+    const place = (im, list, fn) => list.forEach((h, i) => { m4.position.set(h.x, 0, h.z); m4.rotation.set(0, h.yaw, 0); m4.scale.set(1, 1, 1); m4.updateMatrix(); im.setMatrixAt(i, m4.matrix); if (fn) fn(i, h); });
+    // 보행 신호등: 기둥 2.8m, 함 0.38 × 0.8m, 위 빨간 사람 / 아래 초록 사람
+    const pPole = new THREE.CylinderGeometry(0.06, 0.07, 3.0, 6); pPole.translate(0, 1.5, 0);
+    const pBox = new THREE.BoxGeometry(0.38, 0.8, 0.2); pBox.translate(0, 2.55, 0.12);
+    const pRed = new THREE.PlaneGeometry(0.26, 0.26); pRed.translate(0, 2.74, 0.225);
+    const pGreen = new THREE.PlaneGeometry(0.26, 0.26); pGreen.translate(0, 2.36, 0.225);
+    const pedPoleM = inst(pPole, darkMat, pedHeads), pedBoxM = inst(pBox, darkMat, pedHeads);
+    const pedRedM = inst(pRed, lampMats(), pedHeads), pedGreenM = inst(pGreen, lampMats(), pedHeads);
+    for (const im of [pedPoleM, pedBoxM, pedRedM, pedGreenM]) place(im, pedHeads);
+    // 차량 신호등: 기둥 5.6m, 길 위로 뻗은 팔 끝에 가로형 3색등
+    const cPole = new THREE.CylinderGeometry(0.1, 0.13, 5.8, 8); cPole.translate(0, 2.9, 0);
+    const cArm = new THREE.BoxGeometry(1, 0.12, 0.12); // 길이는 인스턴스마다 늘린다
+    const cBox = new THREE.BoxGeometry(1.25, 0.42, 0.3);
+    const cLamp = new THREE.PlaneGeometry(0.3, 0.3);
+    const carPoleM = inst(cPole, darkMat, carHeads), carArmM = inst(cArm, darkMat, carHeads), carBoxM = inst(cBox, darkMat, carHeads);
+    const carLampM = [0, 1, 2].map(() => inst(cLamp, lampMats(), carHeads)); // 빨강, 노랑, 초록 (왼쪽부터)
+    place(carPoleM, carHeads);
+    carHeads.forEach((h, i) => {
+      // 기둥에서 길 안쪽(진행 방향의 왼쪽)으로 팔을 뻗는다
+      const fx = Math.sin(h.yaw), fz = Math.cos(h.yaw);
+      const lx = -fz, lz = fx; // 진행 방향(fx, fz)의 왼쪽 = 길 안쪽
+      const ax = h.x + lx * h.reach / 2, az = h.z + lz * h.reach / 2;
+      m4.position.set(ax, 5.6, az); m4.rotation.set(0, h.yaw + Math.PI, 0); m4.scale.set(h.reach, 1, 1); m4.updateMatrix(); carArmM.setMatrixAt(i, m4.matrix);
+      const bx = h.x + lx * h.reach, bz = h.z + lz * h.reach;
+      m4.position.set(bx, 5.35, bz); m4.rotation.set(0, h.yaw, 0); m4.scale.set(1, 1, 1); m4.updateMatrix(); carBoxM.setMatrixAt(i, m4.matrix);
+      // 등은 다가오는 차 쪽(-진행 방향)을 본다
+      [-0.4, 0, 0.4].forEach((o, k) => {
+        m4.position.set(bx + lx * o - fx * 0.16, 5.35, bz + lz * o - fz * 0.16); m4.rotation.set(0, h.yaw + Math.PI, 0); m4.updateMatrix();
+        carLampM[k].setMatrixAt(i, m4.matrix);
+      });
+    });
+    group.add(pedPoleM, pedBoxM, pedRedM, pedGreenM, carPoleM, carArmM, carBoxM, ...carLampM);
+    const LAMP = {
+      redOn: new THREE.Color(1.0, 0.16, 0.1), redOff: new THREE.Color(0.16, 0.05, 0.04),
+      yellowOn: new THREE.Color(1.0, 0.72, 0.1), yellowOff: new THREE.Color(0.16, 0.12, 0.03),
+      greenOn: new THREE.Color(0.15, 1.0, 0.55), greenOff: new THREE.Color(0.03, 0.14, 0.08),
+    };
+    let lastSignalUpdate = -1;
+    function updateSignals(t) {
+      if (Math.abs(t - lastSignalUpdate) < 0.2) return;
+      lastSignalUpdate = t;
+      const blinkOn = Math.floor(t * 2) % 2 === 0;
+      pedHeads.forEach((h, i) => {
+        const { ped } = signalOf(h.c, t);
+        pedRedM.setColorAt(i, ped === "red" ? LAMP.redOn : LAMP.redOff);
+        pedGreenM.setColorAt(i, ped === "green" || (ped === "flash" && blinkOn) ? LAMP.greenOn : LAMP.greenOff);
+      });
+      carHeads.forEach((h, i) => {
+        const { car } = signalOf(h.c, t);
+        carLampM[0].setColorAt(i, car === "red" ? LAMP.redOn : LAMP.redOff);
+        carLampM[1].setColorAt(i, car === "yellow" ? LAMP.yellowOn : LAMP.yellowOff);
+        carLampM[2].setColorAt(i, car === "green" ? LAMP.greenOn : LAMP.greenOff);
+      });
+      for (const im of [pedRedM, pedGreenM, ...carLampM]) if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
 
     // 가로수·가로등: 건물 안, 막힌 땅, 출발점·목적지 근처에는 세우지 않는다
     const insideSolid = (x, z) => solids.at(x, z).some((p) => x >= p.minx - 0.8 && x <= p.maxx + 0.8 && z >= p.minz - 0.8 && z <= p.maxz + 0.8 && pointInPoly(x, z, p.pts));
@@ -677,11 +816,12 @@ const SCENERY = (() => {
     // 매 프레임: 경고등 깜빡임
     function tick(now) {
       lampMat.emissiveIntensity = Math.sin(now * 0.004) > 0 ? 1.8 : 0.15;
+      updateSignals(now / 1000);
     }
     // 가장자리 가림막 앞인지 (안내 문구를 띄울 때 쓴다)
     const nearEdge = (x, z) => x < EDGE_BAND + 1.2 || z < EDGE_BAND + 1.2 || x > size - EDGE_BAND - 1.2 || z > size - EDGE_BAND - 1.2;
 
-    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, stats: { buildings: polys.length, trees: trees.length, exits: exits.length },
+    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, stats: { buildings: polys.length, trees: trees.length, exits: exits.length },
       exits: exits.map(({ e, t0, t1 }) => { const [x, z] = e.along((t0 + t1) / 2); return { x, z, inward: e.inward, width: t1 - t0 }; }) };
   }
 

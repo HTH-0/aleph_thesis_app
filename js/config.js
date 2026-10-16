@@ -26,6 +26,20 @@ const CONFIG = {
   PROXIMITY_DEPTH: 0.35,
   PROXIMITY_RATE: 5.5,
   LANDMARK_MARGIN: 200,      // 지도 밖이라도 이 거리 안의 장소는 소리로 쓴다
+
+  // 거리: 큰 차도와 신호
+  WIDE_ROAD: 10,             // 이 폭(m) 이상인 차도는 걸어서 들어갈 수 없다 (tools/build_maps.mjs의 WIDE_ROAD와 같다)
+  SIGNAL_GREEN: 30,          // 한 방향 차량 초록불(초)
+  SIGNAL_YELLOW: 3,          // 노란불(초). 이 동안은 모든 방향 보행 신호가 빨간불이다
+  PED_FLASH: 5,              // 보행 초록불이 끝나기 전 깜빡이는 시간(초)
+
+  // 행인과 차량 (플레이어 주변에서만 움직인다. 소리는 내지 않는다)
+  NPC_RADIUS: 150,           // 이 거리(m) 안에서만 행인·차량을 둔다
+  PEDESTRIANS: 120,
+  CARS: 35,
+  PED_SPEED: 1.3,            // m/s
+  CAR_SPEED: 10,             // 큰길 m/s (약 36km/h)
+  CAR_SPEED_ALLEY: 4,        // 골목 m/s
 };
 
 // 장소 종류별 소리. group이 서로 다른 소리를 우선 골라 음색이 겹치지 않게 한다.

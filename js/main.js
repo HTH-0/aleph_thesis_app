@@ -186,7 +186,7 @@ function drawBriefMap(canvas, map, route, landmarks) {
   const img = new ImageData(map.n, map.n);
   for (let i = 0; i < map.n * map.n; i++) {
     const k = map.kind[i];
-    img.data.set(k === 2 ? [236, 235, 226, 255] : [58, 61, 56, 255], i * 4);
+    img.data.set(k === 2 ? [236, 235, 226, 255] : k === 3 ? [112, 114, 118, 255] : [58, 61, 56, 255], i * 4);
   }
   const tmp = document.createElement("canvas");
   tmp.width = tmp.height = map.n;

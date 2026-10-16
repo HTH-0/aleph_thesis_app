@@ -48,6 +48,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: var(-
 .dot.start { background: #3fbf6a; }
 .dot.goal { background: #ffc94a; }
 .dot.road { background: #ecebe2; border-radius: 0; border: 1px solid #999; }
+.dot.carway { background: #707276; border-radius: 0; border: 1px solid #999; }
 #brief-sounds { margin-bottom: var(--space-4); }
 #brief-sounds .sound-chip { margin: 0 6px 6px 0; }
 
