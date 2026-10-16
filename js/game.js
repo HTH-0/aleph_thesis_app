@@ -50,6 +50,8 @@ function runRound(spec, onComplete) {
 
   // 칸 판정: "." 걷는 칸과 "#" 건물 칸은 통과하고(건물은 실제 벽 모양으로 따로 막는다), 그 밖의 땅은 막는다
   function isBlocked(x, z) {
+    const e = scenery.edgeBand; // 지도 가장자리 가림막 앞까지만 갈 수 있다
+    if (x < e || z < e || x > map.size - e || z > map.size - e) return true;
     const c = Math.floor(x / map.cell), r = Math.floor(z / map.cell);
     if (r < 0 || c < 0 || r >= map.n || c >= map.n) return true;
     return map.kind[r * map.n + c] === 0;
@@ -127,6 +129,31 @@ function runRound(spec, onComplete) {
   }
   document.addEventListener("pointerlockchange", onPointerLockChange);
 
+  // 테스트 모드 전용: 자동 점검 스크립트가 플레이어를 원하는 곳으로 옮길 수 있게 한다
+  if (TEST_MODE) {
+    window.__play = {
+      exits: scenery.exits,
+      teleport(x, z, y) {
+        // 나무나 벽과 겹치면 가까운 빈 자리로 옮긴다
+        for (let r = 0; r < 6 && !canStandAt(x, z); r += 0.5) {
+          const a = [0, 1.57, 3.14, 4.71].find((t) => canStandAt(x + Math.cos(t) * r, z + Math.sin(t) * r));
+          if (a !== undefined) { x += Math.cos(a) * r; z += Math.sin(a) * r; break; }
+        }
+        camera.position.x = x; camera.position.z = z; yaw = y; pitch = 0;
+      },
+      pos() { return { x: camera.position.x.toFixed(1), z: camera.position.z.toFixed(1), yaw: yaw.toFixed(2) }; },
+    };
+  }
+
+  const toastEl = document.getElementById("play-toast");
+  let toastTimer = null;
+  function showToast() {
+    if (!toastEl || !toastEl.hidden) return;
+    toastEl.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.hidden = true; }, 2200);
+  }
+
   let raf = null, lastT = performance.now();
   let fpsFrames = 0, fpsTime = 0, fpsText = "";
 
@@ -142,6 +169,8 @@ function runRound(spec, onComplete) {
     soundscape.stopAll();
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     overlayEl.classList.add("hidden");
+    clearTimeout(toastTimer);
+    if (toastEl) toastEl.hidden = true;
     scene.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
   }
 
@@ -191,6 +220,8 @@ function runRound(spec, onComplete) {
         if (canStandAt(cx + dx, cz)) nx = cx + dx;
         if (canStandAt(nx, cz + dz)) nz = cz + dz;
         distance += Math.hypot(nx - cx, nz - cz);
+        // 가림막에 막혀 거의 못 움직였으면 안내 문구를 잠깐 띄운다
+        if (Math.hypot(nx - cx, nz - cz) < Math.hypot(dx, dz) * 0.3 && scenery.nearEdge(cx, cz)) showToast();
         camera.position.x = nx;
         camera.position.z = nz;
       }
@@ -221,6 +252,7 @@ function runRound(spec, onComplete) {
       }
     }
     updateSky();
+    scenery.tick(now);
     renderer.render(scene, camera);
   }
   raf = requestAnimationFrame(animate);

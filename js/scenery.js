@@ -116,6 +116,35 @@ const SCENERY = (() => {
         g.fillStyle = "#4f7038"; g.fillRect(0, 0, w, h); noise(g, w, h, 60, 8);
         g.fillStyle = "#8d8577"; g.fillRect(0, h - 26, w, 26); // 화단 아래 돌 테두리
       }, a),
+      // 공사 가림막: 판넬 4장(장당 2m × 2.4m). 흰 판에 파란 띠, 한국 공사장에서 흔한 문구를 적는다
+      panel: canvasTex(1024, 512, (g, w, h) => {
+        const words = ["공사중", "안전제일", "통행제한", "우회하세요"];
+        for (let i = 0; i < 4; i++) {
+          const x = i * 256;
+          g.fillStyle = "#f3f4f1"; g.fillRect(x, 0, 256, h);
+          g.fillStyle = "#1f4fa0"; g.fillRect(x, 18, 256, 22); g.fillRect(x, h - 120, 256, 120);
+          g.fillStyle = "#2e8b57"; g.fillRect(x, h - 132, 256, 10);
+          g.fillStyle = "#1f4fa0";
+          g.font = "bold 50px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
+          g.textAlign = "center"; g.textBaseline = "middle";
+          g.fillText(words[i], x + 128, h * 0.42);
+          g.fillStyle = "#ffffff"; g.font = "bold 26px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
+          g.fillText("SAFETY FIRST", x + 128, h - 60);
+          g.fillStyle = "rgba(0,0,0,0.25)"; g.fillRect(x + 252, 0, 4, h); // 판넬 이음매
+        }
+        noise(g, w, h, 6, 9);
+      }, a),
+      // 노란색·검은색 사선 줄무늬 (1m에 한 쌍)
+      stripes: canvasTex(128, 32, (g, w, h) => {
+        g.fillStyle = "#f2c230"; g.fillRect(0, 0, w, h);
+        g.fillStyle = "#1d1d1d";
+        for (let x = -h; x < w + h; x += 64) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 32, h); g.lineTo(x + 32 + h, 0); g.lineTo(x + h, 0); g.fill(); }
+      }, a),
+      // 라바콘: 주황 몸통에 흰 반사띠 두 줄 (위가 캔버스 위쪽)
+      cone: canvasTex(16, 128, (g, w, h) => {
+        g.fillStyle = "#f2611d"; g.fillRect(0, 0, w, h);
+        g.fillStyle = "#f4f4f0"; g.fillRect(0, h * 0.28, w, h * 0.13); g.fillRect(0, h * 0.55, w, h * 0.11);
+      }, a),
     };
     TEX.ground = TEX.paving.clone();
     TEX.ground.needsUpdate = true;
@@ -181,7 +210,19 @@ const SCENERY = (() => {
     }
   }
 
-  const WALL_TINTS = ["#ebe6dc", "#e0d9cb", "#d3cdc3", "#e8e3d8", "#cbc1b2", "#bcb1a2", "#dcd6ce", "#aca69d", "#c9d2d6", "#d9cbb5"];
+  // 세로로 선 사각형 한 장 (a에서 b까지, 높이 y0~y1)
+  function vquad(B, a, b, y0, y1, u0, u1, col) {
+    const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz) || 1;
+    const nx = dz / len, nz = -dx / len;
+    const put = (x, y, z, u, v) => vtx(B, x, y, z, nx, 0, nz, u, v, col);
+    put(a[0], y0, a[1], u0, 0); put(b[0], y1, b[1], u1, 1); put(b[0], y0, b[1], u1, 0);
+    put(a[0], y0, a[1], u0, 0); put(a[0], y1, a[1], u0, 1); put(b[0], y1, b[1], u1, 1);
+  }
+
+  const MARGIN = 350; // 지도 밖으로 배경을 그리는 거리(m). tools/build_maps.mjs의 SCENERY_MARGIN과 같다
+  const EDGE_BAND = 1.8; // 지도 가장자리에서 이 거리 안으로는 들어가지 못한다 (가림막과 라바콘이 서는 자리)
+
+  const WALL_TINTS =["#ebe6dc", "#e0d9cb", "#d3cdc3", "#e8e3d8", "#cbc1b2", "#bcb1a2", "#dcd6ce", "#aca69d", "#c9d2d6", "#d9cbb5"];
   const BRICK = ["#9a5a44", "#8a5a46", "#a8735a"];
   const ROAD_LAYER = 0.04;
 
@@ -209,8 +250,8 @@ const SCENERY = (() => {
     const size = map.size, n = map.n, cell = map.cell;
     const ONE = new THREE.Color(1, 1, 1);
 
-    // 바닥: 지도 밖까지 보도블록을 깐다
-    const span = size + 600;
+    // 바닥: 지도 밖 배경까지 보도블록을 깐다
+    const span = size + MARGIN * 2 + 100;
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(span, span), new THREE.MeshStandardMaterial({ map: T.ground, roughness: 0.95 }));
     T.ground.repeat.set(span / 4, span / 4);
     ground.rotation.x = -Math.PI / 2;
@@ -404,6 +445,7 @@ const SCENERY = (() => {
     // 녹지와 광장
     for (const g of sc.green) {
       const { pts, area } = orient(g.p);
+      if (g.k === "water") continue; // 물은 아래에서 따로 그린다
       const isPlaza = g.k === "plaza" || g.k === "parking";
       if (isPlaza) { polyUp(BPLAZA, pts, 0.028, 4, ONE); continue; }
       polyUp(BGREEN, pts, 0.025, 5, ONE);
@@ -418,6 +460,112 @@ const SCENERY = (() => {
     }
     for (const t of sc.trees) treeSpots.push(t);
 
+    // ---------- 지도 밖 배경 ----------
+    // OSM에 건물이 없는 바깥 빈 땅도 저층 건물로 채워서, 지도 밖이 허허벌판으로 보이지 않게 한다.
+    // 길(차도 + 보도)과 공원·물 위에는 세우지 않는다.
+    const roadIdx = makeIndex(20);
+    for (const rd of roads) for (let i = 0; i < rd.pts.length - 1; i++) {
+      const a = rd.pts[i], b = rd.pts[i + 1], pad = rd.w / 2 + 5;
+      roadIdx.add(Math.min(a[0], b[0]) - pad, Math.min(a[1], b[1]) - pad, Math.max(a[0], b[0]) + pad, Math.max(a[1], b[1]) + pad, { a, b, pad });
+    }
+    const greenIdx = makeIndex(40);
+    for (const g of sc.green) {
+      const xs = g.p.map((p) => p[0]), zs = g.p.map((p) => p[1]);
+      greenIdx.add(Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), g.p);
+    }
+    const nearRoad = (x, z, extra) => roadIdx.at(x, z).some((s) => segDist2(x, z, s.a, s.b) < (s.pad + extra) ** 2);
+    const onGreen = (x, z) => greenIdx.at(x, z).some((p) => pointInPoly(x, z, p));
+    const onBuilding = (x, z) => solids.at(x, z).some((p) => x >= p.minx && x <= p.maxx && z >= p.minz && z <= p.maxz && pointInPoly(x, z, p.pts));
+    const OLOT = 10;
+    for (let z0 = -MARGIN; z0 < size + MARGIN; z0 += OLOT) for (let x0 = -MARGIN; x0 < size + MARGIN; x0 += OLOT) {
+      const x1 = x0 + OLOT, z1 = z0 + OLOT;
+      if (x1 > -2 && x0 < size + 2 && z1 > -2 && z0 < size + 2) continue; // 지도 안(과 가장자리)은 위에서 채웠다
+      const cx = x0 + OLOT / 2, cz = z0 + OLOT / 2;
+      if (nearRoad(cx, cz, 2)) continue;
+      const probes = [[cx, cz], [x0 + 1, z0 + 1], [x1 - 1, z0 + 1], [x0 + 1, z1 - 1], [x1 - 1, z1 - 1]];
+      if (probes.some(([x, z]) => onBuilding(x, z) || onGreen(x, z) || nearRoad(x, z, -3))) continue;
+      const k = Math.round(x0 * 7.3 + z0 * 131.7);
+      const r = hash(k * 1.9);
+      const floors = r < 0.12 ? 8 + Math.floor(hash(k) * 10) : 2 + Math.floor(r * 4); // 가끔 높은 건물을 섞어 스카이라인을 만든다
+      const pts = [[x0 + 0.4, z0 + 0.4], [x1 - 0.4, z0 + 0.4], [x1 - 0.4, z1 - 0.4], [x0 + 0.4, z1 - 0.4]];
+      const h = floors * FLOOR + 0.6;
+      const tint = lin(WALL_TINTS[Math.floor(hash(k * 2.7) * WALL_TINTS.length)]);
+      if (nearRoad(cx, cz, 8) && floors <= 5) {
+        addWalls(BS, pts, 0, SHOP_H, ONE, 4, 4, SHOP_H, 1, k, 0.78);
+        addWalls(hash(k * 3) < 0.5 ? BP : BR, pts, SHOP_H, h, tint, BAY, 4, FLOOR, 4, k, 0.94);
+      } else {
+        addWalls(hash(k * 3) < 0.5 ? BP : BR, pts, 0, h, tint, BAY, 4, FLOOR, 4, k, 0.74);
+      }
+      polyUp(BROOF, pts, h, 8, lin(hash(k * 5) < 0.3 ? "#6f9a7c" : "#b4b1aa"));
+    }
+
+    // ---------- 지도 가장자리 가림막 ----------
+    // 걷는 길이 지도 가장자리에 닿는 곳마다 공사 가림막을 세워 "공사 중이라 못 지나간다"는 것을 보여 준다.
+    // 넓은 길은 흰·파란 가림막 판넬 + 앞쪽 줄무늬 바리케이드와 라바콘, 좁은 길은 줄무늬 바리케이드와 라바콘만 둔다.
+    const BPANEL = buf(), BSTRIPE = buf(), BPOST = buf();
+    const conePos = [], lampPos = [];
+    const DARK = lin("#3b3e42");
+    const exits = [];
+    const edges = [
+      { cellAt: (k) => k, along: (t) => [t, 0], inward: [0, 1] },                       // 북쪽
+      { cellAt: (k) => (n - 1) * n + k, along: (t) => [t, size], inward: [0, -1] },     // 남쪽
+      { cellAt: (k) => k * n, along: (t) => [0, t], inward: [1, 0] },                   // 서쪽
+      { cellAt: (k) => k * n + n - 1, along: (t) => [size, t], inward: [-1, 0] },       // 동쪽
+    ];
+    for (const e of edges) {
+      for (let k = 0; k < n; k++) {
+        if (map.kind[e.cellAt(k)] !== 2) continue;
+        let k1 = k;
+        while (k1 + 1 < n && map.kind[e.cellAt(k1 + 1)] === 2) k1++;
+        exits.push({ e, t0: k * cell, t1: (k1 + 1) * cell });
+        k = k1;
+      }
+    }
+    // 판넬과 기둥 한 줄: from~to를 따라 inward 방향으로 off만큼 들어간 곳에 세운다
+    const line = (e, t0, t1, off) => [
+      [e.along(t0)[0] + e.inward[0] * off, e.along(t0)[1] + e.inward[1] * off],
+      [e.along(t1)[0] + e.inward[0] * off, e.along(t1)[1] + e.inward[1] * off],
+    ];
+    function postAt(p, h) {
+      const s = 0.06;
+      const pts = [[p[0] - s, p[1] - s], [p[0] + s, p[1] - s], [p[0] + s, p[1] + s], [p[0] - s, p[1] + s]];
+      addWalls(BPOST, pts, 0, h, DARK, 1, 1, h, 1, 0, 1);
+    }
+    exits.forEach((x, i) => {
+      const w = x.t1 - x.t0;
+      // 가림막이 길 양쪽 끝의 건물·화단과 맞닿도록 1m씩 더 늘린다
+      const t0 = x.t0 - 1, t1 = x.t1 + 1;
+      if (w >= 6) {
+        let [a, b] = line(x.e, t0, t1, 0.3);
+        if ((b[1] - a[1]) * x.e.inward[0] - (b[0] - a[0]) * x.e.inward[1] < 0) [a, b] = [b, a];
+        const panels = Math.max(1, Math.round((t1 - t0) / 2));
+        vquad(BPANEL, a, b, 0.05, 2.4, (i % 4) / 4 + panels / 4, (i % 4) / 4, ONE);
+        for (let p = 0; p <= panels; p++) postAt([a[0] + (b[0] - a[0]) * (p / panels), a[1] + (b[1] - a[1]) * (p / panels)], 2.5);
+      }
+      // 줄무늬 바리케이드: 판넬 앞(또는 좁은 길에서는 단독으로) 1.0m 안쪽에 두 줄
+      const bw = w >= 6 ? Math.min(6, w * 0.6) : w + 2;
+      const groups = w >= 6 ? Math.max(1, Math.round(w / 30)) : 1;
+      for (let gi = 0; gi < groups; gi++) {
+        const mid = x.t0 + (w / groups) * (gi + 0.5);
+        const [c, d] = line(x.e, mid - bw / 2, mid + bw / 2, w >= 6 ? 1.0 : 0.6);
+        for (const y of [0.55, 0.92]) vquad(BSTRIPE, c, d, y, y + 0.22, 0, bw, ONE);
+        postAt(c, 1.15); postAt(d, 1.15);
+        lampPos.push([c[0], c[1]], [d[0], d[1]]);
+        // 라바콘: 바리케이드 앞에 2~4개를 조금씩 흐트러뜨려 놓는다
+        const cones = Math.min(4, Math.max(1, Math.floor(bw / 1.5)));
+        for (let k = 0; k < cones; k++) {
+          const t = mid - bw / 2 + (bw / cones) * (k + 0.5) + (hash(i * 13 + gi * 7 + k) - 0.5) * 0.5;
+          conePos.push(line(x.e, t, t, 1.4 + hash(i * 3 + k) * 0.2)[0]);
+        }
+      }
+      // 긴 가림막에는 사이사이에 라바콘을 드문드문 둔다
+      if (w >= 6) for (let t = x.t0 + 4; t < x.t1 - 4; t += 9 + hash(t) * 6) conePos.push(line(x.e, t, t, 1.3)[0]);
+    });
+
+    // 물(강, 호수)
+    const BWATER = buf();
+    for (const g of sc.green) if (g.k === "water") polyUp(BWATER, orient(g.p).pts, 0.03, 10, ONE);
+
     const poly = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
     const std = (map, extra) => new THREE.MeshStandardMaterial(Object.assign({ map, vertexColors: true, roughness: 0.9, metalness: 0 }, extra || {}));
     group.add(toMesh(BROAD, std(T.asphalt, Object.assign({ roughness: 0.85 }, poly))));
@@ -431,6 +579,28 @@ const SCENERY = (() => {
     group.add(toMesh(BG, std(T.glass, { roughness: 0.35 }), true));
     group.add(toMesh(BS, std(T.shop, { roughness: 0.6 }), true));
     group.add(toMesh(BROOF, std(T.roof, { roughness: 1 }), true));
+    group.add(toMesh(BWATER, new THREE.MeshStandardMaterial({ color: lin("#5f8296"), roughness: 0.25, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })));
+    group.add(toMesh(BPANEL, std(T.panel, { side: THREE.DoubleSide, roughness: 0.7 }), true));
+    group.add(toMesh(BSTRIPE, std(T.stripes, { side: THREE.DoubleSide, roughness: 0.6 }), true));
+    group.add(toMesh(BPOST, std(null, { roughness: 0.8 }), true));
+
+    // 라바콘과 바리케이드 위 경고등 (경고등은 천천히 깜빡인다)
+    const coneGeo = new THREE.ConeGeometry(0.2, 0.72, 14, 1, true); coneGeo.translate(0, 0.4, 0);
+    const baseGeo = new THREE.BoxGeometry(0.44, 0.05, 0.44); baseGeo.translate(0, 0.025, 0);
+    const coneMesh = new THREE.InstancedMesh(coneGeo, new THREE.MeshStandardMaterial({ map: T.cone, roughness: 0.6 }), Math.max(1, conePos.length));
+    const baseMesh = new THREE.InstancedMesh(baseGeo, new THREE.MeshStandardMaterial({ color: lin("#26282b"), roughness: 0.9 }), Math.max(1, conePos.length));
+    coneMesh.count = baseMesh.count = conePos.length;
+    const lampGeo = new THREE.BoxGeometry(0.16, 0.16, 0.16); lampGeo.translate(0, 1.25, 0);
+    const lampMat = new THREE.MeshStandardMaterial({ color: lin("#f2a12a"), emissive: lin("#ffb02e"), emissiveIntensity: 1.5, roughness: 0.4 });
+    const warnMesh = new THREE.InstancedMesh(lampGeo, lampMat, Math.max(1, lampPos.length));
+    warnMesh.count = lampPos.length;
+    {
+      const m = new THREE.Object3D();
+      conePos.forEach((p, i) => { m.position.set(p[0], 0, p[1]); m.rotation.set(0, hash(i) * 6.28, 0); m.updateMatrix(); coneMesh.setMatrixAt(i, m.matrix); baseMesh.setMatrixAt(i, m.matrix); });
+      lampPos.forEach((p, i) => { m.position.set(p[0], 0, p[1]); m.rotation.set(0, 0, 0); m.updateMatrix(); warnMesh.setMatrixAt(i, m.matrix); });
+    }
+    coneMesh.castShadow = baseMesh.castShadow = true;
+    group.add(coneMesh, baseMesh, warnMesh);
 
     // 가로수·가로등: 건물 안, 막힌 땅, 출발점·목적지 근처에는 세우지 않는다
     const insideSolid = (x, z) => solids.at(x, z).some((p) => x >= p.minx - 0.8 && x <= p.maxx + 0.8 && z >= p.minz - 0.8 && z <= p.maxz + 0.8 && pointInPoly(x, z, p.pts));
@@ -443,7 +613,11 @@ const SCENERY = (() => {
       const k = cellKind(x, z);
       return (k === 2 || k === -1) && !insideSolid(x, z) && clearOf(x, z);
     };
-    const trees = treeSpots.filter(([x, z]) => x > -100 && z > -100 && x < size + 100 && z < size + 100 && okSpot(x, z));
+    const nearExit = (x, z) => exits.some(({ e, t0, t1 }) => {
+      const [ax, az] = e.along((t0 + t1) / 2);
+      return Math.hypot(ax - x, az - z) < (t1 - t0) / 2 + 3;
+    });
+    const trees = treeSpots.filter(([x, z]) => x > -250 && z > -250 && x < size + 250 && z < size + 250 && okSpot(x, z) && !nearExit(x, z));
     const obstacles = makeIndex(8);
     const trunkGeo = new THREE.CylinderGeometry(0.13, 0.2, 3, 6); trunkGeo.translate(0, 1.5, 0);
     const crownGeo = new THREE.IcosahedronGeometry(2, 0); crownGeo.translate(0, 4.4, 0);
@@ -500,7 +674,15 @@ const SCENERY = (() => {
       return false;
     }
 
-    return { group, hits, stats: { buildings: polys.length, trees: trees.length } };
+    // 매 프레임: 경고등 깜빡임
+    function tick(now) {
+      lampMat.emissiveIntensity = Math.sin(now * 0.004) > 0 ? 1.8 : 0.15;
+    }
+    // 가장자리 가림막 앞인지 (안내 문구를 띄울 때 쓴다)
+    const nearEdge = (x, z) => x < EDGE_BAND + 1.2 || z < EDGE_BAND + 1.2 || x > size - EDGE_BAND - 1.2 || z > size - EDGE_BAND - 1.2;
+
+    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, stats: { buildings: polys.length, trees: trees.length, exits: exits.length },
+      exits: exits.map(({ e, t0, t1 }) => { const [x, z] = e.along((t0 + t1) / 2); return { x, z, inward: e.inward, width: t1 - t0 }; }) };
   }
 
   // ---------- 하늘, 빛, 안개 ----------

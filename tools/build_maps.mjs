@@ -23,7 +23,7 @@ export const REGIONS = [
 
 const CELL = 2; // 격자 한 칸(m)
 const LANDMARK_MARGIN = 200; // 지도 밖이라도 이 거리(m) 안의 장소는 소리 후보로 쓴다
-const SCENERY_MARGIN = 120; // 지도 밖이라도 이 거리(m) 안의 건물은 배경으로 그린다
+const SCENERY_MARGIN = 350; // 지도 밖이라도 이 거리(m) 안의 건물·도로·녹지는 배경으로 그린다 (안개가 끝나는 거리보다 조금 넓게)
 const FLOOR = 3.3; // 층 높이(m)
 
 const ENDPOINTS = [
@@ -141,9 +141,11 @@ async function buildRegion(region) {
   way[highway](${sbb});
   way[building](${sbb});
   relation[building](${sbb});
-  way[leisure~"^(park|garden|pitch|playground)$"](${bb});
-  way[landuse~"^(grass|park|forest|recreation_ground|village_green)$"](${bb});
-  way[natural~"^(wood|scrub|grassland)$"](${bb});
+  way[leisure~"^(park|garden|pitch|playground)$"](${sbb});
+  way[landuse~"^(grass|park|forest|recreation_ground|village_green)$"](${sbb});
+  way[natural~"^(wood|scrub|grassland)$"](${sbb});
+  way[waterway=river](${sbb});
+  way[natural=water](${sbb});
   way[place=square](${bb});
   way[amenity=parking](${bb});
   node[natural=tree](${bb});
@@ -222,7 +224,9 @@ out geom;`;
     const kind = buildingKind(t);
     const { h, measured: m } = kind === "roof" ? { h: 4, measured: false } : buildingHeight(t, a, id);
     if (m) measured++;
-    buildings.push({ p: pts, h: Math.round(h * 10) / 10, k: kind, m: m ? 1 : 0 });
+    const out = !inside(cx, cz, 0);
+    const p = out ? pts.map(([x, z]) => [Math.round(x * 2) / 2, Math.round(z * 2) / 2]) : pts;
+    buildings.push({ p, h: Math.round(h * 10) / 10, k: kind, m: m ? 1 : 0 });
     if (kind !== "roof") fillPolygon(pts, building); // 지붕만 있는 구조물(주유소 캐노피 등)은 밑으로 걸어 다닐 수 있다
   }
 
@@ -257,10 +261,10 @@ out geom;`;
     }
     if (el.type === "way" && geom && !t.building && !t.highway) {
       const pts = closeRing(geom);
-      const g = t.leisure || t.landuse || t.natural || (t.place === "square" ? "plaza" : null) || (t.amenity === "parking" ? "parking" : null);
-      if (pts && g && g !== "tree_row") {
+      const g = t.natural === "water" ? "water" : t.leisure || t.landuse || t.natural || (t.place === "square" ? "plaza" : null) || (t.amenity === "parking" ? "parking" : null);
+      if (pts && g && g !== "tree_row" && !t.waterway) {
         green.push({ p: pts, k: g });
-        fillPolygon(pts, area); // 공원, 광장, 주차장은 걸어 다닐 수 있다
+        if (g !== "water") fillPolygon(pts, area); // 공원, 광장, 주차장은 걸어 다닐 수 있다
       }
       if (t.natural === "tree_row") for (const p of geom) trees.push(p);
     }
@@ -279,7 +283,7 @@ out geom;`;
       } else if (el.bounds) {
         [x, z] = toXZ({ lat: (el.bounds.minlat + el.bounds.maxlat) / 2, lon: (el.bounds.minlon + el.bounds.maxlon) / 2 });
       } else continue;
-      landmarks.push({ type, name: t.name || null, x: Math.round(x), z: Math.round(z), osm: `${el.type}/${el.id}` });
+      if (inside(x, z, LANDMARK_MARGIN)) landmarks.push({ type, name: t.name || null, x: Math.round(x), z: Math.round(z), osm: `${el.type}/${el.id}` });
     }
   }
 
