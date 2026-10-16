@@ -92,12 +92,15 @@ function pickLandmarks(map) {
 // 두 판의 출발점·목적지를 고른다. 두 판의 최단경로 길이는 거의 같게 맞춘다.
 function pickRoutes(map, landmarks, rng) {
   const n = map.n;
-  const edge = 4;
+  const edge = Math.ceil(16 / map.cell);
   const candidates = [];
+  // 출발점·목적지는 주변 칸도 모두 걷는 칸인 곳에서 고른다 (건물 벽에 붙어 시작하지 않게)
+  const open = (i) => map.walk[i] && map.walk[i - 1] && map.walk[i + 1] && map.walk[i - n] && map.walk[i + n] &&
+    map.walk[i - n - 1] && map.walk[i - n + 1] && map.walk[i + n - 1] && map.walk[i + n + 1];
   for (let r = edge; r < n - edge; r++) {
     for (let c = edge; c < n - edge; c++) {
       const i = r * n + c;
-      if (!map.walk[i]) continue;
+      if (!open(i)) continue;
       const p = cellCenter(map, i);
       if (landmarks.some((l) => Math.hypot(l.x - p.x, l.z - p.z) < CONFIG.GOAL_MIN_DIST_FROM_LANDMARK)) continue;
       candidates.push(i);
@@ -105,7 +108,8 @@ function pickRoutes(map, landmarks, rng) {
   }
   if (candidates.length < 10) throw new Error("이 지도에서는 길을 만들 수 없습니다.");
 
-  for (let target = CONFIG.ROUTE_CELLS; target >= 40; target = Math.floor(target * 0.85)) {
+  const minCells = Math.round(160 / map.cell);
+  for (let target = Math.round(CONFIG.ROUTE_METERS / map.cell); target >= minCells; target = Math.floor(target * 0.85)) {
     const lo = Math.floor(target * (1 - CONFIG.ROUTE_TOLERANCE));
     const hi = Math.ceil(target * (1 + CONFIG.ROUTE_TOLERANCE));
     const routes = [];

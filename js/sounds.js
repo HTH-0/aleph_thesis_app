@@ -57,7 +57,7 @@ class SoundScape {
     for (let i = 0; i < d.length; i++) {
       const t = i / sr;
       const noise = Math.random() * 2 - 1;
-      if (type === "stadium" || type === "playground") {
+      if (type === "stadium" || type === "playground" || type === "market") {
         last = last * 0.97 + noise * 0.03; // 낮게 웅성거리는 소리
         d[i] = last * 4 * (0.7 + 0.3 * Math.sin(t * 1.3));
       } else if (type === "fountain") {

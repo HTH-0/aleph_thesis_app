@@ -6,13 +6,13 @@ const CONFIG = {
   MOVE_SPEED: 6,          // m/s (Shift를 누르면 RUN_SPEED)
   RUN_SPEED: 9,
   LOOK_SENSITIVITY: 0.0022,
-  FOG_NEAR: 4,
-  FOG_FAR: 30,            // 논문처럼 가까운 곳만 보이게 한다 (격자 약 7칸)
+  FOG_NEAR: 60,
+  FOG_FAR: 320,           // 이 거리(m)부터 안개에 완전히 가려진다. 줄이면 길찾기가 어려워진다
   GOAL_RADIUS: 4,
   ROUND_TIMEOUT_SEC: 300,
 
-  // 출발점과 목적지 사이 최단경로 길이(격자 칸 수). 칸 하나는 4m.
-  ROUTE_CELLS: 110,
+  // 출발점과 목적지 사이 최단경로 길이(m)
+  ROUTE_METERS: 440,
   ROUTE_TOLERANCE: 0.1,
   GOAL_MIN_DIST_FROM_LANDMARK: 40, // 목적지에는 소리를 두지 않는다 (논문 2.1)
 
@@ -45,9 +45,11 @@ const SOUND_TYPES = {
   fountain:     { label: "분수대", sound: "물소리", file: "sounds/fountain.mp3", group: "water", mode: "loop", loopStart: 0.5, loopEnd: 18, gain: 2.6, lowpass: 2200, color: "#3b9aa8" },
   // 11.4초, 아이들 고함이 순간적으로 커서(최대 0.99) 고음을 깎는다
   playground:   { label: "놀이터", sound: "아이들 소리", file: "sounds/playground.mp3", group: "crowd", mode: "loop", loopStart: 0.5, loopEnd: 11, gain: 0.8, lowpass: 3000, color: "#5a9a4a" },
+  // 시장 소리 파일이 아직 없어 합성음으로 재생한다. 파일을 넣으면 음량과 반복 구간을 다시 맞춘다
+  market:       { label: "시장", sound: "시장 소리", file: "sounds/market.mp3", group: "market", mode: "loop", gain: 0.8, lowpass: 4000, color: "#b5651d" },
 };
 // 같은 group 안에서 먼저 고를 순서
-const SOUND_PRIORITY = ["stadium", "construction", "church", "temple", "fountain", "playground"];
+const SOUND_PRIORITY = ["stadium", "construction", "church", "temple", "fountain", "market", "playground"];
 
 // 논문 3.1 표: 소리 3개 조건의 시간비 (자기 소리 0개 시행 대비)
 const PAPER = {

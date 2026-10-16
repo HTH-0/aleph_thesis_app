@@ -12,5 +12,6 @@ fountain.mp3      Fountain Water Sound Effect 3 (Pixel_perfect)
                   https://pixabay.com/sound-effects/nature-fountain-water-sound-effect-3-211597/
 playground.mp3    kids at playground short length (flutie8211)
                   https://pixabay.com/sound-effects/city-kids-at-playground-short-length-478451/
+market.mp3        (아직 고르지 않음. 파일이 없어서 지금은 합성음으로 재생한다)
 
 라이선스: Pixabay Content License (https://pixabay.com/service/license-summary/)

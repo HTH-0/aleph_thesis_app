@@ -6,98 +6,11 @@ const TEST_MODE = new URLSearchParams(location.search).get("test") === "1";
 let _renderer = null;
 function getRenderer(canvas) {
   if (!_renderer) {
-    _renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    _renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    _renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
+    _renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
   }
   _renderer.setSize(window.innerWidth, window.innerHeight);
   return _renderer;
-}
-
-function hash01(i) {
-  const x = Math.sin(i * 12.9898) * 43758.5453;
-  return x - Math.floor(x);
-}
-
-// 걷는 칸에 맞닿은 칸만 벽으로 그린다 (전체를 그리면 너무 무겁다)
-function buildWalls(scene, map) {
-  const n = map.n, cell = map.cell;
-  const buildingCells = [], hedgeCells = [];
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      const i = r * n + c;
-      if (map.walk[i]) continue;
-      let touches = false;
-      for (let dr = -1; dr <= 1 && !touches; dr++) {
-        for (let dc = -1; dc <= 1 && !touches; dc++) {
-          const rr = r + dr, cc = c + dc;
-          if (rr >= 0 && cc >= 0 && rr < n && cc < n && map.walk[rr * n + cc]) touches = true;
-        }
-      }
-      // 지도 가장자리도 막아 둔다
-      if (!touches && (r === 0 || c === 0 || r === n - 1 || c === n - 1)) touches = true;
-      if (!touches) continue;
-      (map.kind[i] === 1 ? buildingCells : hedgeCells).push(i);
-    }
-  }
-  // 지도 가장자리의 걷는 칸 바깥에도 벽이 필요하다: 이동 판정에서 지도 밖은 막힘으로 처리한다.
-
-  const box = new THREE.BoxGeometry(cell, 1, cell);
-  box.translate(0, 0.5, 0);
-  const dummy = new THREE.Object3D();
-  const color = new THREE.Color();
-
-  const bMesh = new THREE.InstancedMesh(box, new THREE.MeshLambertMaterial({ color: 0xffffff }), buildingCells.length);
-  buildingCells.forEach((i, k) => {
-    const r = Math.floor(i / n), c = i % n;
-    const h = 9 + Math.floor(hash01(Math.floor(r / 6) * 977 + Math.floor(c / 6)) * 4) * 3;
-    dummy.position.set(c * cell + cell / 2, 0, r * cell + cell / 2);
-    dummy.scale.set(1, h, 1);
-    dummy.updateMatrix();
-    bMesh.setMatrixAt(k, dummy.matrix);
-    const tone = 0.78 + hash01(i) * 0.08;
-    color.setRGB(tone, tone * 0.97, tone * 0.92);
-    bMesh.setColorAt(k, color);
-  });
-  scene.add(bMesh);
-
-  const hMesh = new THREE.InstancedMesh(box, new THREE.MeshLambertMaterial({ color: 0xffffff }), hedgeCells.length);
-  hedgeCells.forEach((i, k) => {
-    const r = Math.floor(i / n), c = i % n;
-    dummy.position.set(c * cell + cell / 2, 0, r * cell + cell / 2);
-    dummy.scale.set(1, 2.6, 1);
-    dummy.updateMatrix();
-    hMesh.setMatrixAt(k, dummy.matrix);
-    const g = 0.42 + hash01(i * 7) * 0.08;
-    color.setRGB(g * 0.75, g, g * 0.7);
-    hMesh.setColorAt(k, color);
-  });
-  scene.add(hMesh);
-
-  // 가로등: 벽에 맞닿은 걷는 칸 몇 곳에 세워서, 넓은 길에서도 움직이는 느낌이 나게 한다
-  const lampCells = [];
-  for (let r = 1; r < n - 1; r++) {
-    for (let c = 1; c < n - 1; c++) {
-      const i = r * n + c;
-      if (!map.walk[i] || hash01(i * 3.1) > 0.06) continue;
-      if (!map.walk[i - 1] || !map.walk[i + 1] || !map.walk[i - n] || !map.walk[i + n]) lampCells.push(i);
-    }
-  }
-  const pole = new THREE.CylinderGeometry(0.12, 0.15, 5, 6);
-  pole.translate(0, 2.5, 0);
-  const head = new THREE.BoxGeometry(0.5, 0.25, 1.2);
-  head.translate(0, 5, 0);
-  const poleMesh = new THREE.InstancedMesh(pole, new THREE.MeshLambertMaterial({ color: 0x4a4d52 }), lampCells.length);
-  const headMesh = new THREE.InstancedMesh(head, new THREE.MeshLambertMaterial({ color: 0xf2e6b8 }), lampCells.length);
-  lampCells.forEach((i, k) => {
-    const r = Math.floor(i / n), c = i % n;
-    dummy.position.set(c * cell + cell / 2, 0, r * cell + cell / 2);
-    dummy.scale.set(1, 1, 1);
-    dummy.rotation.y = hash01(i) * Math.PI;
-    dummy.updateMatrix();
-    poleMesh.setMatrixAt(k, dummy.matrix);
-    headMesh.setMatrixAt(k, dummy.matrix);
-  });
-  scene.add(poleMesh, headMesh);
 }
 
 // spec: { canvas, overlayEl, timerEl, hudEl, map, route, landmarks, soundscape, withSound }
@@ -106,44 +19,9 @@ function runRound(spec, onComplete) {
   const renderer = getRenderer(canvas);
 
   const scene = new THREE.Scene();
-  const sky = 0xc9ced6;
-  scene.background = new THREE.Color(sky);
-  scene.fog = new THREE.Fog(sky, CONFIG.FOG_NEAR, CONFIG.FOG_FAR);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f7a, 0.85));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.45);
-  sun.position.set(0.4, 1, 0.3);
-  scene.add(sun);
-
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
-
-  // 바닥: 걷는 칸은 아스팔트, 길 가장자리는 보도블록 색으로 칠한 지도 텍스처
-  const tex = document.createElement("canvas");
-  tex.width = tex.height = map.n;
-  const tctx = tex.getContext("2d");
-  const img = tctx.createImageData(map.n, map.n);
-  for (let i = 0; i < map.n * map.n; i++) {
-    const r = Math.floor(i / map.n), c = i % map.n;
-    let v = [110, 112, 108];
-    if (map.walk[i]) {
-      const edge = (c > 0 && !map.walk[i - 1]) || (c < map.n - 1 && !map.walk[i + 1]) ||
-        (r > 0 && !map.walk[i - map.n]) || (r < map.n - 1 && !map.walk[i + map.n]);
-      v = edge ? [176, 170, 160] : [128, 130, 134];
-    }
-    img.data.set([...v, 255], i * 4);
-  }
-  tctx.putImageData(img, 0, 0);
-  const groundTex = new THREE.CanvasTexture(tex);
-  groundTex.magFilter = THREE.NearestFilter;
-  groundTex.minFilter = THREE.LinearFilter;
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(map.size, map.size),
-    new THREE.MeshLambertMaterial({ map: groundTex })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.set(map.size / 2, 0, map.size / 2);
-  scene.add(ground);
-
-  buildWalls(scene, map);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.2, CONFIG.FOG_FAR + 400);
+  const updateSky = SCENERY.atmosphere(scene, renderer, camera);
+  const scenery = SCENERY.build(scene, renderer, map, [route.startPos, route.goalPos]);
 
   // 목적지: 안개 안으로 들어와야 보이는 금색 기둥
   const goal = route.goalPos;
@@ -170,14 +48,16 @@ function runRound(spec, onComplete) {
     if (open.length) yaw = open[Math.floor(Math.random() * open.length)][2];
   }
 
+  // 칸 판정: "." 걷는 칸과 "#" 건물 칸은 통과하고(건물은 실제 벽 모양으로 따로 막는다), 그 밖의 땅은 막는다
   function isBlocked(x, z) {
     const c = Math.floor(x / map.cell), r = Math.floor(z / map.cell);
     if (r < 0 || c < 0 || r >= map.n || c >= map.n) return true;
-    return !map.walk[r * map.n + c];
+    return map.kind[r * map.n + c] === 0;
   }
   function canStandAt(x, z) {
     const rr = CONFIG.PLAYER_RADIUS;
-    return !isBlocked(x - rr, z) && !isBlocked(x + rr, z) && !isBlocked(x, z - rr) && !isBlocked(x, z + rr);
+    if (isBlocked(x - rr, z) || isBlocked(x + rr, z) || isBlocked(x, z - rr) || isBlocked(x, z + rr)) return false;
+    return !scenery.hits(x, z, rr);
   }
 
   const keys = {};
@@ -214,7 +94,8 @@ function runRound(spec, onComplete) {
   async function onOverlayClick(e) {
     if (e.target === giveUpBtn || finished) return;
     overlayEl.classList.add("hidden");
-    try { canvas.requestPointerLock(); } catch (err) { /* 포인터 잠금이 안 돼도 키보드로는 움직일 수 있다 */ }
+    // 포인터 잠금이 안 돼도 키보드로는 움직일 수 있다 (최신 브라우저는 실패를 Promise로 알린다)
+    try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) { /* 위와 같다 */ }
     if (!started) {
       started = true;
       if (withSound) {
@@ -247,6 +128,7 @@ function runRound(spec, onComplete) {
   document.addEventListener("pointerlockchange", onPointerLockChange);
 
   let raf = null, lastT = performance.now();
+  let fpsFrames = 0, fpsTime = 0, fpsText = "";
 
   function cleanup() {
     window.removeEventListener("keydown", onKeyDown);
@@ -261,7 +143,6 @@ function runRound(spec, onComplete) {
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     overlayEl.classList.add("hidden");
     scene.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
-    groundTex.dispose();
   }
 
   function finish(outcome) {
@@ -283,6 +164,8 @@ function runRound(spec, onComplete) {
     raf = requestAnimationFrame(animate);
     const dt = Math.min((now - lastT) / 1000, 0.1);
     lastT = now;
+    fpsFrames++; fpsTime += dt;
+    if (fpsTime >= 1) { fpsText = `${Math.round(fpsFrames / fpsTime)} fps`; fpsFrames = 0; fpsTime = 0; }
     camera.rotation.order = "YXZ";
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
@@ -325,7 +208,7 @@ function runRound(spec, onComplete) {
             })
           : ["(소리 없음)"];
         const dg = Math.hypot(camera.position.x - goal.x, camera.position.z - goal.z);
-        hudEl.textContent = [...lines, `목적지까지 직선 ${dg.toFixed(0)}m`, "P: 즉시 도착"].join("\n");
+        hudEl.textContent = [...lines, `목적지까지 직선 ${dg.toFixed(0)}m`, fpsText, "P: 즉시 도착"].join("\n");
       }
 
       if (Math.hypot(camera.position.x - goal.x, camera.position.z - goal.z) < CONFIG.GOAL_RADIUS) {
@@ -337,6 +220,7 @@ function runRound(spec, onComplete) {
         return;
       }
     }
+    updateSky();
     renderer.render(scene, camera);
   }
   raf = requestAnimationFrame(animate);

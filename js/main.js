@@ -183,18 +183,25 @@ function showBriefing() {
 function drawBriefMap(canvas, map, route, landmarks) {
   const ctx = canvas.getContext("2d");
   const W = canvas.width;
-  const s = W / map.n;
-  ctx.fillStyle = "#3a3d38";
-  ctx.fillRect(0, 0, W, W);
-  for (let r = 0; r < map.n; r++) {
-    for (let c = 0; c < map.n; c++) {
-      const k = map.kind[r * map.n + c];
-      if (k === 0) continue;
-      ctx.fillStyle = k === 2 ? "#ecebe2" : "#8b8c9c";
-      ctx.fillRect(c * s, r * s, Math.ceil(s), Math.ceil(s));
-    }
+  const img = new ImageData(map.n, map.n);
+  for (let i = 0; i < map.n * map.n; i++) {
+    const k = map.kind[i];
+    img.data.set(k === 2 ? [236, 235, 226, 255] : [58, 61, 56, 255], i * 4);
   }
+  const tmp = document.createElement("canvas");
+  tmp.width = tmp.height = map.n;
+  tmp.getContext("2d").putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tmp, 0, 0, W, W);
   const toPx = (x) => (x / map.size) * W;
+  ctx.fillStyle = "#8b8c9c";
+  for (const b of (map.scenery && map.scenery.buildings) || []) {
+    if (b.k === "roof") continue;
+    ctx.beginPath();
+    b.p.forEach(([x, z], i) => (i ? ctx.lineTo(toPx(x), toPx(z)) : ctx.moveTo(toPx(x), toPx(z))));
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.font = "bold 15px 'IBM Plex Sans KR', sans-serif";
   ctx.textBaseline = "middle";
   for (const l of landmarks) {
