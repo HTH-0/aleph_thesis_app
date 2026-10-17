@@ -146,6 +146,8 @@ function runRound(spec, onComplete) {
         }
         camera.position.x = x; camera.position.z = z; yaw = y; pitch = 0;
       },
+      // 높이 h(m)에서 내려다보기 (지붕·외벽 확인용). 다시 걷기 전에 teleport와 view(…, CONFIG.EYE_HEIGHT, …, 0)로 되돌린다
+      view(x, z, h, y, p) { camera.position.set(x, h, z); yaw = y; pitch = p; },
       pos() { return { x: camera.position.x.toFixed(1), z: camera.position.z.toFixed(1), yaw: yaw.toFixed(2) }; },
     };
   }
@@ -176,7 +178,10 @@ function runRound(spec, onComplete) {
     overlayEl.classList.add("hidden");
     clearTimeout(toastTimer);
     if (toastEl) toastEl.hidden = true;
-    scene.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    scene.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) { if (o.material.userData && o.material.userData.ownMap && o.material.map) o.material.map.dispose(); o.material.dispose(); }
+    });
   }
 
   function finish(outcome) {

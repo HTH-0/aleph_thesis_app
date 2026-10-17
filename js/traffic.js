@@ -59,7 +59,9 @@ const TRAFFIC = (() => {
     const pedPaths = [];
     for (const rd of roads) {
       const hw = rd.w / 2;
-      const offsets = rd.k === "plaza" ? [-hw / 2, hw / 2] : rd.w >= WIDE ? [-(hw + 2.9), hw + 2.9] : rd.w >= 5 ? [-(hw + 0.6), hw + 0.6] : [];
+      // 보도 폭(rd.sw, 서울 보도 통계)이 있으면 보도 가운데보다 조금 바깥쪽을 걷는다
+      const side = rd.sw && rd.w >= 5 ? hw + rd.sw * 0.7 : rd.w >= WIDE ? hw + 2.9 : rd.w >= 5 ? hw + 0.6 : 0;
+      const offsets = rd.k === "plaza" ? [-hw / 2, hw / 2] : side ? [-side, side] : [];
       for (const o of offsets) {
         const S = offsetSamples(rd.pts, o, 2);
         let run = [];

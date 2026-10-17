@@ -63,6 +63,54 @@ async function seoulCrosswalk() {
   return { dir, page: "https://data.seoul.go.kr/dataList/OA-15554/S/1/datasetView.do" };
 }
 
+// xlsx(zip 안의 xml)에서 시트 하나를 행 배열로 읽는다. 공유 문자열과 숫자 칸만 다룬다.
+function xlsxSheet(buf, sheetName) {
+  const files = new Map(unzip(buf).map((e) => [e.name.toString("utf8"), e]));
+  const xml = (name) => files.get(name).data().toString("utf8");
+  const strings = (xml("xl/sharedStrings.xml").match(/<si>[\s\S]*?<\/si>/g) || [])
+    .map((si) => (si.match(/<t[^>]*>[^<]*<\/t>/g) || []).map((t) => t.replace(/<[^>]+>/g, "")).join(""));
+  const names = [...xml("xl/workbook.xml").matchAll(/<sheet [^>]*name="([^"]+)"/g)].map((m) => m[1]);
+  const idx = names.findIndex((n) => n.includes(sheetName));
+  if (idx < 0) throw new Error(`시트를 찾지 못했습니다: ${sheetName} (있는 시트: ${names.join(", ")})`);
+  const rows = [];
+  for (const r of xml(`xl/worksheets/sheet${idx + 1}.xml`).match(/<row[^>]*>[\s\S]*?<\/row>/g) || []) {
+    const row = [];
+    for (const c of r.match(/<c [^>]*?(\/>|>[\s\S]*?<\/c>)/g) || []) {
+      let col = 0;
+      for (const ch of c.match(/r="([A-Z]+)\d+"/)[1]) col = col * 26 + ch.charCodeAt(0) - 64;
+      let v = (c.match(/<v>([^<]*)<\/v>/) || [])[1];
+      if (/ t="s"/.test(c)) v = strings[+v];
+      row[col - 1] = v;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+async function seoulSidewalk() {
+  // 서울 열린데이터광장 OA-22240 "서울시 보도 통계자료" (노선별 보도 폭). 특별시도 세부현황 시트만 JSON으로 정리해 둔다
+  const pageUrl = "https://data.seoul.go.kr/dataList/OA-22240/F/1/datasetView.do";
+  const page = await (await fetch(pageUrl, { headers: UA })).text();
+  const m = page.match(/downloadFile\('(\d+)'\);">(서울시 보도 통계자료[^<]*\.xlsx)/);
+  if (!m) throw new Error("서울 보도 통계 페이지에서 파일을 찾지 못했습니다");
+  const res = await fetch("https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do?&useCache=false", {
+    method: "POST",
+    headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded", Referer: pageUrl },
+    body: new URLSearchParams({ infId: "OA-22240", infSeq: "1", seq: m[1] }).toString(),
+  });
+  if (!res.ok) throw new Error("서울 보도 통계 다운로드 실패: " + res.status);
+  const rows = xlsxSheet(Buffer.from(await res.arrayBuffer()), "특별시도 보도 세부현황");
+  const head = rows[0];
+  const col = (name) => head.findIndex((h) => h && h.replace(/\s/g, "").startsWith(name));
+  const [cGu, cName, cDir, cSec, cLen, cW, cKind] = ["관리기관", "노선명", "방향", "구간", "연장", "폭", "횡단구성"].map(col);
+  const out = rows.slice(1).filter((r) => r[cName] && Number(r[cW]) > 0)
+    .map((r) => ({ gu: r[cGu], name: r[cName].trim(), dir: r[cDir] || "", section: r[cSec] || "", len: Number(r[cLen]) || 0, width: Number(r[cW]), kind: r[cKind] || "" }));
+  const dir = join(OUT, "seoul_sidewalk");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "sidewalk.json"), JSON.stringify(out));
+  return { dir, page: pageUrl, file: m[2], count: out.length };
+}
+
 async function daeguCrosswalk() {
   // 공공데이터포털 15029067 "대구광역시_횡단보도". 사이트의 다운로드 순서(파일 번호 조회 → 다운로드 횟수 확인 → 받기)를 따른다.
   // 다운로드 횟수 제한에 걸려 보안문자를 요구하면 멈추고, 사람이 브라우저에서 받도록 안내한다.
@@ -99,6 +147,8 @@ const s = await seoulCrosswalk();
 console.log("서울 횡단보도:", s.dir);
 const d = await daeguCrosswalk();
 console.log("대구 횡단보도:", d.dir, d.names.join(", "));
+const w = await seoulSidewalk();
+console.log("서울 보도 통계:", w.dir, `${w.count}행`);
 const base = d.names.find((n) => /\.shp$/i.test(n)).replace(/\.shp$/i, "");
 if (base !== "A0043325") console.warn(`대구 파일 이름이 바뀌었습니다(${base}). tools/build_maps.mjs의 PUBLIC_CROSSWALKS.daegu.file을 "daegu_crosswalk/${base}"로 고쳐 주세요.`);
 writeFileSync(join(OUT, "출처.txt"), `이 폴더의 파일은 지도 생성(tools/build_maps.mjs)에만 쓰고, 저장소와 배포물에는 넣지 않는다.
@@ -114,8 +164,14 @@ daegu_crosswalk/${base}.*
   ${d.page}
   좌표계는 .prj 파일을 따른다 (2023-08-16 파일은 EPSG:5187)
 
+seoul_sidewalk/sidewalk.json
+  ${w.file}의 "특별시도 보도 세부현황" 시트를 JSON으로 옮긴 것 (서울 열린데이터광장 OA-22240), 공공누리 제1유형(출처표시)
+  ${w.page}
+  노선명별 보도 폭(m). 도형이 없어서 OSM 도로 이름과 노선명을 맞춰 쓴다
+
 (사용자가 넣을 파일) GIS건물통합정보 SHP: 서울특별시, 대구광역시
-  국토교통부 GIS건물통합정보, 공공누리 제1유형(출처표시), 브이월드 로그인 필요
+  국토교통부 GIS건물통합정보, 저작자표시(CC BY), 브이월드 로그인 필요
+  받은 zip을 vworld_building/seoul/, vworld_building/daegu/에 풀어 둔다 (AL_D010_11_*, AL_D010_27_*)
   https://www.vworld.kr/dtmk/dtmk_ntads_s002.do?svcCde=NA&dsId=18
 `);
 console.log("출처 기록:", join(OUT, "출처.txt"));

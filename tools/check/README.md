@@ -10,6 +10,7 @@ Chrome을 못 찾으면 `CHROME_PATH` 환경 변수로 위치를 알려 준다.
 |---|---|
 | `node tools/check/routes.mjs` | 7개 지도에서 소리 3개와 두 판 경로(시드 10개)가 만들어지는지 검사한다. 실패가 있으면 종료 코드 1 |
 | `node tools/check/grid.mjs banwoldang` | 이동 판정 격자를 PNG로 그린다. 큰길로 지도가 끊겼는지 볼 때 쓴다 |
+| `node tools/check/islands.mjs` | 차도·보도 자리인데 걷는 영역에서 떨어져 나간 길(막힌 땅·화단이 된 곳)의 비율과 위치를 지역마다 보여 준다. 지도 끝 20m 안 덩어리는 "가장자리"로 따로 센다 |
 | `node tools/check/crosswalk_xcheck.mjs` | 공공 횡단보도와 규칙 교차로의 일치 비율 표를 다시 만든다 (먼저 `node tools/fetch_public.mjs`) |
 | `node tools/check/shp_info.mjs <파일.shp>` | 새 공공데이터 Shapefile의 열 이름과 첫 값, 위경도 변환 결과를 보여 준다 |
 
