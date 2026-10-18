@@ -226,6 +226,8 @@ const TRAFFIC = (() => {
 
     const NCAR = CONFIG.CARS;
     const CAR_COLORS = ["#f2f2f0", "#f2f2f0", "#f2f2f0", "#1a1b1d", "#1a1b1d", "#8e9297", "#b8bcc0", "#b8bcc0", "#283a5c", "#7a1f24"].map(lin);
+    const BRAKE = new THREE.Color(1.0, 0.04, 0.03);
+    const LAMP = new THREE.Vector3(0.7, 0.7, 1); // 모델 차의 브레이크등은 상자 차 등보다 작게 (둥근 뒷면 옆으로 비어져 나오지 않게)
     const TAXI = lin("#f07a1c"), BUS = ["#2a5caa", "#3a9d4c", "#c8352e"].map(lin);
     const busTex = (() => {
       const c = document.createElement("canvas"); c.width = 256; c.height = 128;
@@ -273,19 +275,23 @@ const TRAFFIC = (() => {
           for (const t of list) if ((r -= t.w[key]) < 0) return t;
           return list[0];
         },
-        draw(cars, base, sign, zero) {
+        draw(cars, base, sign, tail) {
           const n = {};
           for (const t of types) n[t.id] = 0;
-          let ns = 0;
+          let ns = 0, nt = 0;
           const local = new THREE.Matrix4(), m = new THREE.Matrix4();
           for (const car of cars) {
             const t = byId[car.model], k = n[t.id]++;
             base(car);
             for (const { im, paint, matrix } of t.meshes) { m.multiplyMatrices(base.m, matrix); im.setMatrixAt(k, m); if (paint) im.setColorAt(k, car.color); }
             if (car.taxi) { local.makeTranslation(0, t.height + 0.12 - 1.58, -0.3); m.multiplyMatrices(base.m, local); sign.setMatrixAt(ns++, m); } // 지붕 택시 표시등
+            if (car.braking || car.v < 0.3) for (const sx of [-1, 1]) { // 서 있거나 속도를 줄이는 차는 브레이크등을 켠다
+              local.makeTranslation(sx * t.halfW * t.tail[0], t.height * t.tail[1], -t.halfL + 0.06); local.scale(LAMP); m.multiplyMatrices(base.m, local); tail.setMatrixAt(nt, m); tail.setColorAt(nt++, BRAKE);
+            }
           }
           for (const t of types) for (const { im } of t.meshes) { im.count = n[t.id]; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
           sign.count = ns; sign.instanceMatrix.needsUpdate = true;
+          tail.count = nt; tail.instanceMatrix.needsUpdate = true; if (tail.instanceColor) tail.instanceColor.needsUpdate = true;
         },
       };
     })();
@@ -483,10 +489,13 @@ const TRAFFIC = (() => {
       // 막다른 길이면 같은 길의 반대 차로로 돌아 나온다 (사라지지 않게)
       if (!ahead.length) { const back = here.filter((l) => l.piece === ln.piece); return back.length ? pick(back) : null; }
       const opts = ahead.filter((l) => turn(l) > -0.2); // 거의 되돌아가는 방향은 피한다
-      const pool = opts.length ? opts : ahead;
+      let pool = opts.length ? opts : ahead;
+      // 버스(11m)는 큰길로만 이어 가고 거의 직진한다. 골목으로 꺾으면 차체가 보도로 넘어간다 (2026-10-18 상암 측정 3.3~5.9%)
+      const big = car.model === "bus";
+      if (big) { const wide = pool.filter((l) => l.wide); if (wide.length) pool = wide; }
       // 곧게 이어지는 길을 더 자주 고른다
       const straight = pool.filter((l) => turn(l) > 0.8);
-      return straight.length && Math.random() < 0.6 ? pick(straight) : pick(pool);
+      return straight.length && Math.random() < (big ? 0.9 : 0.6) ? pick(straight) : pick(pool);
     }
     function updateCars(dt, t, player) {
       for (let i = cars.length - 1; i >= 0; i--) {
@@ -556,8 +565,8 @@ const TRAFFIC = (() => {
       if (fleet) {
         const place = (car) => { v.set(car.x, car.y || 0, car.z); q.setFromAxisAngle(up, car.yaw); s.set(1, 1, 1); base.compose(v, q, s); };
         place.m = base;
-        fleet.draw(cars, place, C.sign, zero);
-        for (const [key, im] of Object.entries(C)) if (key !== "sign") im.count = 0; // 상자 차는 쓰지 않는다
+        fleet.draw(cars, place, C.sign, C.tail);
+        for (const [key, im] of Object.entries(C)) if (key !== "sign" && key !== "tail") im.count = 0; // 상자 차는 쓰지 않는다
         return;
       }
       let nc = 0, nb = 0, nw = 0, nl = 0;

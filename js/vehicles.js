@@ -2,14 +2,15 @@
 // 원본을 게임용으로 정리하는 방법(앞 방향, 길이, 재질 합치기, 로고 덮기)은 tools/convert_cars.mjs.
 
 const VEHICLES = (() => {
-  // use: 어디에 많이 둘지. 큰길은 버스·택시, 골목은 경차·트럭을 더 많이
+  // w: 어디에 많이 둘지. 큰길은 버스·택시, 골목은 경차·트럭을 더 많이
+  // tail: 브레이크등 위치 [차 폭 절반에 대한 비율, 차 높이에 대한 비율]. 경계 상자 폭에 사이드미러가 들어가서 안쪽으로 잡는다 (뒤에서 찍은 사진으로 맞춤)
   const TYPES = [
-    { id: "ioniq5", w: { wide: 30, alley: 25 }, taxi: true },
-    { id: "soul", w: { wide: 15, alley: 25 } },
-    { id: "tucson", w: { wide: 15, alley: 10 } },
-    { id: "milano95", w: { wide: 8, alley: 15 } },
-    { id: "lct3000", w: { wide: 10, alley: 15 } },
-    { id: "bus", w: { wide: 12, alley: 0 } },
+    { id: "ioniq5", w: { wide: 30, alley: 25 }, taxi: true, tail: [0.6, 0.6] },
+    { id: "soul", w: { wide: 15, alley: 25 }, tail: [0.55, 0.6] },
+    { id: "tucson", w: { wide: 15, alley: 10 }, tail: [0.5, 0.66] },
+    { id: "milano95", w: { wide: 8, alley: 15 }, tail: [0.5, 0.66] },
+    { id: "lct3000", w: { wide: 10, alley: 15 }, tail: [0.8, 0.25] },
+    { id: "bus", w: { wide: 12, alley: 0 }, tail: [0.8, 0.3] },
   ];
   let promise = null, data = null;
 
