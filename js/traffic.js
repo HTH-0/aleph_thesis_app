@@ -183,6 +183,47 @@ const TRAFFIC = (() => {
     const mk = (geo) => { const m = withColors(new THREE.InstancedMesh(geo, mat(), NPED), NPED); m.count = 0; m.castShadow = true; m.frustumCulled = false; group.add(m); return m; };
     const P = { torso: mk(torsoGeo), head: mk(headGeo), hair: mk(hairGeo), legL: mk(legGeo), legR: mk(legGeo), armL: mk(armGeo), armR: mk(armGeo) };
 
+    // 행인 모델(js/people.js)을 불러왔으면 상자 사람 대신 쓴다. 자리(slot)마다 사람과 옷이 정해져 있고,
+    // 행인이 생길 때 빈 자리를 하나 받아 사라질 때 돌려준다. 걸을 때는 걷기 동작, 멈추면 서 있는 동작
+    const crowd = (() => {
+      const lib = typeof PEOPLE !== "undefined" && PEOPLE.ready();
+      if (!lib) return null;
+      const WALK_SPEED = 1.35; // 걷기 동작 한 번이 나타내는 걸음 속도(m/s). 실제 걸음 속도에 맞춰 동작 빠르기를 바꾼다
+      const slots = [], free = [];
+      for (let i = 0; i < CONFIG.PEOPLE_MODELS; i++) {
+        const person = lib.people[i % lib.people.length], look = Math.floor(i / lib.people.length) % person.looks.length;
+        const root = PEOPLE.makeOne(person, look);
+        root.visible = false;
+        group.add(root);
+        const mixer = new THREE.AnimationMixer(root), set = lib.clips[person.g];
+        slots.push({ root, mixer, walk: set.walk.map((c) => mixer.clipAction(c)), idle: set.idle.map((c) => mixer.clipAction(c)), cur: null });
+        free.push(i);
+      }
+      return {
+        size: slots.length,
+        rootOf: (i) => slots[i] && slots[i].root, // 테스트 확인용
+        take() { return free.length ? free.splice(Math.floor(Math.random() * free.length), 1)[0] : -1; },
+        release(i) { const s = slots[i]; if (!s) return; s.root.visible = false; s.mixer.stopAllAction(); s.cur = null; free.push(i); },
+        place(pd, dt) {
+          const s = slots[pd.slot];
+          s.root.visible = true;
+          s.root.position.set(pd.x, 0, pd.z);
+          s.root.rotation.y = pd.yaw;
+          s.root.scale.setScalar(0.95 + (pd.h - 0.92) * 0.7); // 키 ±5%
+          const want = pd.moving ? s.walk[pd.walkIdx % s.walk.length] : s.idle[pd.idleIdx % s.idle.length];
+          if (want !== s.cur) {
+            want.reset().play();
+            if (s.cur) want.crossFadeFrom(s.cur, 0.35, false);
+            else want.time = Math.random() * want.getClip().duration; // 처음에는 동작 시점을 사람마다 다르게
+            s.cur = want;
+          }
+          if (pd.moving) want.timeScale = pd.speed / WALK_SPEED;
+          s.mixer.update(dt);
+        },
+      };
+    })();
+    const PED_MAX = crowd ? crowd.size : NPED;
+
     const NCAR = CONFIG.CARS;
     const CAR_COLORS = ["#f2f2f0", "#f2f2f0", "#f2f2f0", "#1a1b1d", "#1a1b1d", "#8e9297", "#b8bcc0", "#b8bcc0", "#283a5c", "#7a1f24"].map(lin);
     const TAXI = lin("#f07a1c"), BUS = ["#2a5caa", "#3a9d4c", "#c8352e"].map(lin);
@@ -220,13 +261,20 @@ const TRAFFIC = (() => {
     const tmp = { m: new THREE.Matrix4(), base: new THREE.Matrix4(), local: new THREE.Matrix4(), q: new THREE.Quaternion(), v: new THREE.Vector3(), s: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) };
     const zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
+    function removePed(i) {
+      if (crowd) crowd.release(peds[i].slot);
+      peds.splice(i, 1);
+    }
     function spawnPed(player, minDist) {
       const cands = pedPoints.near(player.x, player.z, R);
       for (let tries = 0; tries < 8 && cands.length; tries++) {
         const c = pick(cands);
         if (Math.hypot(c.x - player.x, c.z - player.z) < minDist) continue;
         const k = Math.random() * 1e6;
+        const slot = crowd ? crowd.take() : -1;
+        if (crowd && slot < 0) return false;
         peds.push({
+          slot, walkIdx: Math.floor(Math.random() * 9), idleIdx: Math.floor(Math.random() * 9),
           path: pedPaths[c.pi], s: c.s, dir: Math.random() < 0.5 ? 1 : -1, speed: CONFIG.PED_SPEED * (0.8 + Math.random() * 0.4),
           lat: (Math.random() - 0.5) * 0.9, h: 0.92 + Math.random() * 0.14, phase: Math.random() * 6, state: "walk", wait: 0, blocked: 0, lastEvent: null,
           shirt: pick(SHIRTS), pants: pick(PANTS), skin: pick(SKIN), hair: Math.random() < 0.08 ? null : pick(HAIR), x: c.x, z: c.z, yaw: 0, seed: k,
@@ -276,7 +324,7 @@ const TRAFFIC = (() => {
     function updatePeds(dt, t, player) {
       for (let i = peds.length - 1; i >= 0; i--) {
         const pd = peds[i];
-        if (Math.hypot(pd.x - player.x, pd.z - player.z) > R + 20) { peds.splice(i, 1); continue; }
+        if (Math.hypot(pd.x - player.x, pd.z - player.z) > R + 20) { removePed(i); continue; }
         let moving = false;
         // 플레이어가 바로 앞에 있으면 멈추고, 오래 막히면 돌아선다
         const fx = Math.sin(pd.yaw), fz = Math.cos(pd.yaw);
@@ -319,7 +367,7 @@ const TRAFFIC = (() => {
           if (playerAhead) { /* 횡단보도 위에서는 잠깐 기다린다 */ }
           else if (d < 0.3) {
             pd.state = "walk";
-            if (!attachNear(pd, to.x, to.z)) { peds.splice(i, 1); continue; }
+            if (!attachNear(pd, to.x, to.z)) { removePed(i); continue; }
             pd.lastEvent = pd.path.events.find((e) => e.c === pd.cross.c) || null;
           } else {
             const sp = pd.speed * 1.15 * dt;
@@ -331,7 +379,7 @@ const TRAFFIC = (() => {
         if (moving) pd.phase += dt * pd.speed * 5.2;
         pd.moving = moving;
       }
-      while (peds.length < Math.min(NPED, pedPaths.length * 3) && spawnPed(player, peds.length < NPED * 0.6 && !updatePeds.started ? 8 : 35)) {}
+      while (peds.length < Math.min(PED_MAX, pedPaths.length * 3) && spawnPed(player, peds.length < PED_MAX * 0.6 && !updatePeds.started ? 8 : 35)) {}
       updatePeds.started = true;
     }
 
@@ -438,10 +486,11 @@ const TRAFFIC = (() => {
     }
 
     // ---------- 그리기 ----------
-    function draw() {
+    function draw(dt) {
       const { m, base, local, q, v, s, up } = tmp;
       let k = 0;
-      for (const pd of peds) {
+      if (crowd) for (const pd of peds) crowd.place(pd, dt);
+      else for (const pd of peds) {
         v.set(pd.x, 0, pd.z); q.setFromAxisAngle(up, pd.yaw); s.set(pd.h, pd.h, pd.h);
         base.compose(v, q, s);
         P.torso.setMatrixAt(k, base); P.head.setMatrixAt(k, base);
@@ -498,7 +547,7 @@ const TRAFFIC = (() => {
           if ([[l, w], [l, -w], [-l, w], [-l, -w]].some(([a, s]) => !onRoad(car.x + fx * a - fz * s, car.z + fz * a + fx * s, 0))) offRoad.body++;
         }
       }
-      draw();
+      draw(dt);
     }
 
     // 플레이어가 행인이나 차에 닿는지
@@ -514,7 +563,15 @@ const TRAFFIC = (() => {
       return false;
     }
 
-    return { update, hits, stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, lanes: lanes.length, crossings: scenery.crossings.length,
+    return { update, hits,
+      // 테스트 모드용: 행인 위치와 상태 (가까이 가서 모양·동작을 찍을 때)
+      pedList: () => peds.map((p) => {
+        const r = crowd && crowd.rootOf(p.slot), w = new THREE.Vector3();
+        if (r) r.children[0] && r.children[0].getWorldPosition(w);
+        return { x: +p.x.toFixed(1), z: +p.z.toFixed(1), yaw: +p.yaw.toFixed(2), state: p.state, moving: !!p.moving, model: crowd ? p.slot : -1,
+          root: r ? [+r.position.x.toFixed(1), +r.position.z.toFixed(1), r.visible] : null, child: r ? [+w.x.toFixed(1), +w.y.toFixed(2), +w.z.toFixed(1)] : null };
+      }),
+      stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, lanes: lanes.length, crossings: scenery.crossings.length,
         waiting: peds.filter((p) => p.state === "wait").length, crossing: peds.filter((p) => p.state === "cross").length, carsStopped: cars.filter((c) => c.v < 0.3).length,
         offRoadPct: offRoad.samples ? +((offRoad.off / offRoad.samples) * 100).toFixed(1) : 0,
         bodyOffPct: offRoad.samples ? +((offRoad.body / offRoad.samples) * 100).toFixed(1) : 0, offRoadSamples: offRoad.samples, joins: joins.n, longJoins: joins.long, deadEnds: joins.noNext }), };

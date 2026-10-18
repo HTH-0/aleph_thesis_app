@@ -35,7 +35,8 @@ const CONFIG = {
 
   // 행인과 차량 (플레이어 주변에서만 움직인다. 소리는 내지 않는다)
   NPC_RADIUS: 150,           // 이 거리(m) 안에서만 행인·차량을 둔다
-  PEDESTRIANS: 120,
+  PEDESTRIANS: 120,          // 행인 모델(js/people.js)을 못 불러왔을 때의 상자 사람 수
+  PEOPLE_MODELS: 60,         // 행인 모델을 쓸 때의 사람 수 (한 명이 삼각형 약 7천 개라 상자 사람보다 적게 둔다)
   CARS: 35,
   PED_SPEED: 1.3,            // m/s
   CAR_SPEED: 10,             // 큰길 m/s (약 36km/h)

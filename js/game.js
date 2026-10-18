@@ -136,6 +136,8 @@ function runRound(spec, onComplete) {
     window.__play = {
       exits: scenery.exits,
       traffic: () => traffic.stats(),
+      peds: () => traffic.pedList(),
+      freeze(on) { frozen = !!on; },
       crossings: scenery.crossings.map((c) => ({ x: c.x, z: c.z, tx: c.tx, tz: c.tz, w: c.w })),
       kind: (x, z) => scenery.kindAt(x, z),
       teleport(x, z, y) {
@@ -164,6 +166,7 @@ function runRound(spec, onComplete) {
   }
 
   let raf = null, lastT = performance.now();
+  let frozen = false; // 테스트 모드에서 행인·차량을 멈춰 두고 찍을 때
   let fpsFrames = 0, fpsTime = 0, fpsText = "";
 
   function cleanup() {
@@ -182,7 +185,7 @@ function runRound(spec, onComplete) {
     if (toastEl) toastEl.hidden = true;
     scene.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
-      if (o.material) { if (o.material.userData && o.material.userData.ownMap && o.material.map) o.material.map.dispose(); o.material.dispose(); }
+      for (const mt of [].concat(o.material || [])) { if (mt.userData && mt.userData.ownMap && mt.map) mt.map.dispose(); mt.dispose(); } // 행인 모델은 재질이 여러 개다
     });
   }
 
@@ -266,7 +269,7 @@ function runRound(spec, onComplete) {
     }
     updateSky();
     scenery.tick(now);
-    traffic.update(dt, now / 1000, camera.position);
+    if (!frozen) traffic.update(dt, now / 1000, camera.position);
     renderer.render(scene, camera);
   }
   raf = requestAnimationFrame(animate);

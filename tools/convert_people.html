@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>행인 모델 변환</title>
+</head>
+<body>
+<!-- tools/convert_people.mjs가 헤드리스 Chrome으로 여는 페이지. Rocketbox FBX를 읽어 웹용 glb로 다시 저장한다. 게임에는 쓰지 않는다 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/fflate.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSUtils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/TGALoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+<script>
+const manager = new THREE.LoadingManager();
+manager.addHandler(/\.tga$/i, new THREE.TGALoader(manager));
+const loadFBX = (url) => new Promise((ok, no) => new THREE.FBXLoader(manager).load(url, ok, undefined, no));
+const loadTGA = (url) => new Promise((ok) => new THREE.TGALoader().load(url, ok, undefined, () => ok(null)));
+
+// 모델 하나의 구성을 보여 준다 (변환 전에 확인용)
+window.inspect = async (fbx, anim) => {
+  const o = await loadFBX(fbx);
+  const out = { meshes: [], bones: 0, scale: o.scale.toArray(), size: null, anims: o.animations.map((a) => a.name) };
+  const box = new THREE.Box3().setFromObject(o); out.size = box.getSize(new THREE.Vector3()).toArray().map((v) => +v.toFixed(2));
+  o.traverse((n) => {
+    if (n.isBone) out.bones++;
+    if (n.isMesh) {
+      const g = n.geometry, tris = (g.index ? g.index.count : g.attributes.position.count) / 3;
+      const mats = [].concat(n.material).map((m) => ({ name: m.name, map: m.map && m.map.name, alpha: !!m.alphaMap, transparent: m.transparent }));
+      out.meshes.push({ name: n.name, skinned: !!n.isSkinnedMesh, tris, groups: g.groups.length, mats });
+    }
+  });
+  if (anim) {
+    const a = await loadFBX(anim), clip = a.animations[0];
+    const names = new Set(); o.traverse((n) => names.add(n.name));
+    const tracks = clip.tracks.map((t) => t.name.split(".")[0]);
+    out.anim = { name: clip.name, duration: +clip.duration.toFixed(2), tracks: clip.tracks.length, matchedBones: tracks.filter((t) => names.has(t)).length, sample: tracks.slice(0, 4) };
+  }
+  return out;
+};
+
+// 텍스처 이미지(TGA는 픽셀 배열, 그 밖은 이미지)를 size 크기 캔버스로 옮긴다. alpha가 있으면 그 빨강 채널을 투명도로 쓴다
+function toCanvas(img, size, alpha) {
+  const src = (im) => {
+    if (!im) return null;
+    if (im.data) { const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(im.data.buffer, im.data.byteOffset, im.data.length), im.width, im.height), 0, 0); return c; }
+    return im;
+  };
+  const c = document.createElement("canvas"); c.width = c.height = size;
+  const g = c.getContext("2d"); g.drawImage(src(img), 0, 0, size, size);
+  if (alpha) {
+    const a = document.createElement("canvas"); a.width = a.height = size;
+    const ga = a.getContext("2d"); ga.drawImage(src(alpha), 0, 0, size, size);
+    const px = g.getImageData(0, 0, size, size), ap = ga.getImageData(0, 0, size, size).data;
+    for (let i = 0; i < px.data.length; i += 4) px.data[i + 3] = ap[i];
+    g.putImageData(px, 0, 0);
+  }
+  return c;
+}
+
+// FBX 사람 하나와 걷기 동작들을 glb(이진 glTF) 하나로 만든다. 반환: base64
+// texDir: 텍스처 폴더. FBX 안의 텍스처 경로는 Export/ 기준이라 맞지 않아서, 재질 이름(m008_body)으로 Textures/m008_body_color.tga를 직접 읽는다
+window.convert = async (fbx, anims, texDir) => {
+  const o = await loadFBX(fbx);
+  o.scale.setScalar(0.01); // cm → m
+  const mats = [];
+  o.traverse((n) => { if (n.isMesh) for (const m of [].concat(n.material)) if (!mats.includes(m)) mats.push(m); });
+  const imgs = new Map();
+  for (const m of mats) imgs.set(m, await loadTGA(`${texDir}${m.name}_color.tga`));
+  o.traverse((n) => {
+    if (!n.isMesh) return;
+    // FBX에서 읽은 메시는 인덱스 없이 재질 구역(group)만 있다. 이대로 내보내면 구역마다 메시 전체를 다시 그리게 저장되므로,
+    // 인덱스를 만들고 같은 재질의 구역을 하나로 모은다 (Rocketbox는 구역 4~9개 → 재질 수만큼)
+    const g = n.geometry;
+    if (g.groups.length > 1) {
+      const count = g.index ? g.index.count : g.attributes.position.count, src = g.index ? g.index.array : null;
+      const byMat = new Map();
+      for (const gr of g.groups) for (let i = gr.start; i < Math.min(count, gr.start + gr.count); i++) (byMat.get(gr.materialIndex) || byMat.set(gr.materialIndex, []).get(gr.materialIndex)).push(src ? src[i] : i);
+      const idx = [];
+      g.clearGroups();
+      for (const [mi, list] of [...byMat].sort((a, b) => a[0] - b[0])) { g.addGroup(idx.length, list.length, mi); idx.push(...list); }
+      g.setIndex(idx);
+    }
+    n.material = [].concat(n.material).map((m) => {
+      const cut = !!(m.alphaMap || m.transparent); // 머리카락·속눈썹처럼 구멍이 있는 부분 (opacity_color.tga의 알파 채널)
+      const t = imgs.get(m);
+      let tex = null;
+      if (t && t.image && t.image.data) {
+        tex = new THREE.Texture(toCanvas(t.image, cut ? 512 : 1024, null));
+        tex.format = cut ? THREE.RGBAFormat : THREE.RGBFormat; // 내보낼 때 RGBA는 PNG, RGB는 JPEG
+        tex.flipY = t.flipY; tex.encoding = THREE.sRGBEncoding; tex.needsUpdate = true;
+      }
+      return new THREE.MeshStandardMaterial({ name: m.name, map: tex, color: tex ? 0xffffff : m.color, roughness: 0.85, metalness: 0,
+        alphaTest: cut ? 0.5 : 0, side: cut ? THREE.DoubleSide : THREE.FrontSide });
+    });
+    if (n.material.length === 1) n.material = n.material[0];
+  });
+  const names = new Set(); o.traverse((n) => names.add(n.name));
+  const clips = [];
+  for (const url of anims) {
+    const a = await loadFBX(url), clip = a.animations[0];
+    clip.name = decodeURIComponent(url.split("/").pop()).replace(/\.max\.fbx$/, "");
+    clip.tracks = clip.tracks.filter((t) => names.has(t.name.split(".")[0])); // 뼈가 없는 트랙(발자국 표시 등)은 뺀다
+    clips.push(clip);
+  }
+  const buf = await new Promise((ok) => new THREE.GLTFExporter().parse(o, ok, { binary: true, animations: clips, maxTextureSize: 1024 }));
+  let s = ""; const u = new Uint8Array(buf);
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+</script>
+</body>
+</html>
