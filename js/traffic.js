@@ -253,6 +253,42 @@ const TRAFFIC = (() => {
       head: imk(lightGeo, new THREE.MeshBasicMaterial({ color: lin("#fff6dc"), toneMapped: false }), NCAR * 2),
     };
     C.tail.castShadow = C.head.castShadow = false;
+
+    // 차량 모델(js/vehicles.js)을 불러왔으면 상자 차 대신 쓴다. 차종·재질마다 InstancedMesh 하나로 그린다
+    const fleet = (() => {
+      const lib = typeof VEHICLES !== "undefined" && VEHICLES.ready();
+      if (!lib) return null;
+      const types = lib.types.map((t) => ({ ...t, meshes: t.parts.map((p) => {
+        const im = withColors(new THREE.InstancedMesh(p.geometry, p.material, NCAR), NCAR);
+        im.count = 0; im.castShadow = true; im.frustumCulled = false; group.add(im);
+        return { im, paint: p.paint, matrix: p.matrix };
+      }) }));
+      const byId = Object.fromEntries(types.map((t) => [t.id, t]));
+      return {
+        byId,
+        // 길 종류(큰길/골목)에 맞춰 차종을 고른다
+        pick(wide) {
+          const key = wide ? "wide" : "alley", list = types.filter((t) => t.w[key] > 0);
+          let r = Math.random() * list.reduce((a, t) => a + t.w[key], 0);
+          for (const t of list) if ((r -= t.w[key]) < 0) return t;
+          return list[0];
+        },
+        draw(cars, base, sign, zero) {
+          const n = {};
+          for (const t of types) n[t.id] = 0;
+          let ns = 0;
+          const local = new THREE.Matrix4(), m = new THREE.Matrix4();
+          for (const car of cars) {
+            const t = byId[car.model], k = n[t.id]++;
+            base(car);
+            for (const { im, paint, matrix } of t.meshes) { m.multiplyMatrices(base.m, matrix); im.setMatrixAt(k, m); if (paint) im.setColorAt(k, car.color); }
+            if (car.taxi) { local.makeTranslation(0, t.height + 0.12 - 1.58, -0.3); m.multiplyMatrices(base.m, local); sign.setMatrixAt(ns++, m); } // 지붕 택시 표시등
+          }
+          for (const t of types) for (const { im } of t.meshes) { im.count = n[t.id]; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
+          sign.count = ns; sign.instanceMatrix.needsUpdate = true;
+        },
+      };
+    })();
     scene.add(group);
 
     // ---------- 상태 ----------
@@ -294,10 +330,16 @@ const TRAFFIC = (() => {
         const d = Math.hypot(p.x - player.x, p.z - player.z);
         if (d > R || d < minDist) continue;
         if (cars.some((c) => Math.hypot(c.x - p.x, c.z - p.z) < 14)) continue;
+        const v = ln.wide ? CONFIG.CAR_SPEED * 0.6 : CONFIG.CAR_SPEED_ALLEY * 0.6, base = { lane: ln, s, v, x: p.x, z: p.z, y: p.y, yaw: Math.atan2(p.dx, p.dz), trans: null, braking: false };
+        if (fleet) {
+          const t = fleet.pick(ln.wide), taxi = !!t.taxi && Math.random() < (ln.wide ? 0.35 : 0.15); // 택시는 아이오닉 5를 주황으로
+          cars.push({ ...base, model: t.id, type: t.id === "bus" ? "bus" : taxi ? "taxi" : "car", taxi, color: taxi ? TAXI : pick(CAR_COLORS), halfL: t.halfL, halfW: t.halfW });
+          return true;
+        }
         const r = Math.random();
         const type = ln.wide && r < 0.12 ? "bus" : r < 0.3 ? "taxi" : "car";
-        cars.push({ lane: ln, s, v: ln.wide ? CONFIG.CAR_SPEED * 0.6 : CONFIG.CAR_SPEED_ALLEY * 0.6, type, color: type === "bus" ? pick(BUS) : type === "taxi" ? TAXI : pick(CAR_COLORS),
-          halfL: type === "bus" ? 5.5 : 2.2, halfW: type === "bus" ? 1.25 : 0.9, x: p.x, z: p.z, y: p.y, yaw: Math.atan2(p.dx, p.dz), trans: null, braking: false });
+        cars.push({ ...base, type, color: type === "bus" ? pick(BUS) : type === "taxi" ? TAXI : pick(CAR_COLORS),
+          halfL: type === "bus" ? 5.5 : 2.2, halfW: type === "bus" ? 1.25 : 0.9 });
         return true;
       }
       return false;
@@ -507,6 +549,13 @@ const TRAFFIC = (() => {
       }
       for (const im of Object.values(P)) { im.count = k; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
 
+      if (fleet) {
+        const place = (car) => { v.set(car.x, car.y || 0, car.z); q.setFromAxisAngle(up, car.yaw); s.set(1, 1, 1); base.compose(v, q, s); };
+        place.m = base;
+        fleet.draw(cars, place, C.sign, zero);
+        for (const [key, im] of Object.entries(C)) if (key !== "sign") im.count = 0; // 상자 차는 쓰지 않는다
+        return;
+      }
       let nc = 0, nb = 0, nw = 0, nl = 0;
       const red = new THREE.Color(), WH = [[-0.8, 1.4], [0.8, 1.4], [-0.8, -1.4], [0.8, -1.4]], WB = [[-1.1, 3.8], [1.1, 3.8], [-1.1, -3.6], [1.1, -3.6]];
       for (const car of cars) {
@@ -564,6 +613,8 @@ const TRAFFIC = (() => {
     }
 
     return { update, hits,
+      // 테스트 모드용: 차 위치와 종류
+      carList: () => cars.map((c) => ({ x: +c.x.toFixed(1), z: +c.z.toFixed(1), y: +(c.y || 0).toFixed(1), yaw: +c.yaw.toFixed(2), model: c.model || c.type, taxi: !!c.taxi, v: +c.v.toFixed(1) })),
       // 테스트 모드용: 행인 위치와 상태 (가까이 가서 모양·동작을 찍을 때)
       pedList: () => peds.map((p) => {
         const r = crowd && crowd.rootOf(p.slot), w = new THREE.Vector3();

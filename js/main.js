@@ -44,6 +44,7 @@ function hasWebGL() {
 // ---------- 첫 화면 ----------
 async function initHome() {
   PEOPLE.load().catch((e) => console.warn("행인 모델을 불러오지 못해 단순한 모양을 씁니다:", e.message)); // 첫 화면을 보는 동안 미리 받는다
+  VEHICLES.load().catch((e) => console.warn("차량 모델을 불러오지 못해 단순한 모양을 씁니다:", e.message));
   $("paper-title").textContent = PAPER.title;
   const list = $("credit-list");
   for (const [what, name, url] of SOUND_CREDITS) {
@@ -233,10 +234,10 @@ function drawBriefMap(canvas, map, route, landmarks) {
 }
 
 async function startRound() {
-  // 행인 모델을 아직 다 못 불러왔으면 잠깐(최대 8초) 기다린다. 실패하면 단순한 사람 모양으로 진행한다
-  if (!PEOPLE.ready()) {
-    setLoading(true, "사람들을 불러오는 중입니다…");
-    await Promise.race([PEOPLE.load().catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
+  // 행인·차량 모델을 아직 다 못 불러왔으면 잠깐(최대 8초) 기다린다. 실패하면 단순한 모양으로 진행한다
+  if (!PEOPLE.ready() || !VEHICLES.ready()) {
+    setLoading(true, "사람과 차를 불러오는 중입니다…");
+    await Promise.race([Promise.all([PEOPLE.load().catch(() => {}), VEHICLES.load().catch(() => {})]), new Promise((r) => setTimeout(r, 8000))]);
     setLoading(false);
   }
   const withSound = state.order[state.round];

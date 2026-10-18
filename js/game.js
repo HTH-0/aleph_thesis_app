@@ -137,6 +137,7 @@ function runRound(spec, onComplete) {
       exits: scenery.exits,
       traffic: () => traffic.stats(),
       peds: () => traffic.pedList(),
+      cars: () => traffic.carList(),
       freeze(on) { frozen = !!on; },
       crossings: scenery.crossings.map((c) => ({ x: c.x, z: c.z, tx: c.tx, tz: c.tz, w: c.w })),
       kind: (x, z) => scenery.kindAt(x, z),

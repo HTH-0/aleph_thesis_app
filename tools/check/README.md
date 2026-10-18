@@ -31,6 +31,7 @@ Chrome을 못 찾으면 `CHROME_PATH` 환경 변수로 위치를 알려 준다.
 | `node tools/check/play.mjs seomun,banwoldang` | 고른 지역만 검사한다 |
 | `node tools/check/traffic.mjs` | 지역마다 출발점과 횡단보도 세 곳에서 차를 지켜보고, 차가 차도 노면 밖에 있던 비율, 교차로 통과·건너뜀, 막다른 길에서 사라진 횟수, 그리기 호출·삼각형 수를 찍는다 |
 | `node tools/check/peds.mjs seomun [사람 번호 0~5]` | 행인 모델을 가까이에서 찍는다: 같은 사람의 원본 옷과 바꾼 옷, 신호를 기다리는 사람 |
+| `node tools/check/cars.mjs banwoldang` | 차종마다 한 대씩 비스듬히 앞에서 찍는다(모양, 방향, 색, 택시 표시등) |
 | `node tools/check/views.mjs seomun` | 횡단보도 앞, 큰길 보도, 지도 끝 가림막 화면을 찍고, 큰 차도로 걸어 들어가기와 가림막 부딪히기를 확인한다 |
 
 헤드리스 Chrome은 기본으로 GPU 없이 그리므로 fps가 10 안팎으로 낮게 나온다. `CHECK_GPU=1`을 앞에 붙이면 이 컴퓨터의 GPU로 그린다(맥북에서 60fps에 막히므로 무게는 HUD의 그리기 호출·삼각형 수로 비교한다). 실제 성능은 일반 브라우저에서 `?test=1`로 열어 왼쪽 위 숫자를 본다.

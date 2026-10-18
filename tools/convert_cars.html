@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>차량 모델 변환</title>
+</head>
+<body>
+<!-- tools/convert_cars.mjs가 헤드리스 Chrome으로 여는 페이지. Sketchfab glb를 게임용으로 정리해 다시 저장한다. 게임에는 쓰지 않는다 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+<script>
+const load = (url) => new Promise((ok, no) => new THREE.GLTFLoader().load(url, ok, undefined, no));
+
+// 텍스처 그림을 size 이하로 줄인 캔버스. 투명이 있으면 PNG, 없으면 JPEG로 내보내도록 format을 정한다
+// cover: 원본 픽셀 좌표로 덮을 곳 { rect: [x, y, w, h, 색], circle: [cx, cy, r, 색], plate: [x, y, w, h] (글자 없는 흰 번호판) }
+function shrink(tex, size, cover) {
+  const img = tex.image, w = Math.min(size, img.width), h = Math.min(size, img.height);
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d"); g.drawImage(img, 0, 0, w, h);
+  const k = w / img.width;
+  for (const cv of cover || []) {
+    if (cv.rect) { g.fillStyle = cv.rect[4]; g.fillRect(cv.rect[0] * k, cv.rect[1] * k, cv.rect[2] * k, cv.rect[3] * k); }
+    if (cv.circle) { g.fillStyle = cv.circle[3]; g.beginPath(); g.arc(cv.circle[0] * k, cv.circle[1] * k, cv.circle[2] * k, 0, 7); g.fill(); }
+    if (cv.plate) {
+      const [x, y, pw, ph] = cv.plate.map((v) => v * k);
+      g.fillStyle = "#f2f2ee"; g.fillRect(x, y, pw, ph);
+      g.strokeStyle = "#2a2a2a"; g.lineWidth = Math.max(1, ph * 0.06); g.strokeRect(x + g.lineWidth, y + g.lineWidth, pw - 2 * g.lineWidth, ph - 2 * g.lineWidth);
+    }
+  }
+  const d = g.getImageData(0, 0, w, h).data;
+  let alpha = false;
+  for (let i = 3; i < d.length; i += 16) if (d[i] < 250) { alpha = true; break; }
+  const t = new THREE.Texture(c);
+  t.format = alpha ? THREE.RGBAFormat : THREE.RGBFormat;
+  Object.assign(t, { flipY: tex.flipY, wrapS: tex.wrapS, wrapT: tex.wrapT, encoding: tex.encoding, needsUpdate: true });
+  return t;
+}
+
+// spec: { url, length(m), yaw(앞을 +Z로 돌릴 각, 라디안), drop: [뺄 재질 이름 정규식], tex: 최대 텍스처 크기 }
+// 반환: { info, views: { front, back, side, top: dataURL } }
+window.prepare = async (spec) => {
+  const gltf = await load(spec.url), src = gltf.scene;
+  src.updateMatrixWorld(true);
+  // 재질별로 모든 메시를 세계 좌표로 합친다
+  const byMat = new Map();
+  src.traverse((o) => {
+    if (!o.isMesh) return;
+    const mats = [].concat(o.material);
+    const base = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    base.applyMatrix4(o.matrixWorld);
+    const groups = base.groups.length ? base.groups : [{ start: 0, count: base.attributes.position.count, materialIndex: 0 }];
+    for (const gr of groups) {
+      const m = mats[gr.materialIndex || 0];
+      if (spec.drop && new RegExp(spec.drop).test(m.name)) continue;
+      const g = new THREE.BufferGeometry();
+      for (const k of ["position", "normal", "uv"]) {
+        const a = base.attributes[k];
+        if (a) g.setAttribute(k, new THREE.BufferAttribute(a.array.slice(gr.start * a.itemSize, (gr.start + gr.count) * a.itemSize), a.itemSize));
+      }
+      if (!g.attributes.uv) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(gr.count * 2), 2));
+      if (!g.attributes.normal) g.computeVertexNormals();
+      (byMat.get(m) || byMat.set(m, []).get(m)).push(g);
+    }
+  });
+  const group = new THREE.Group();
+  for (const [m, list] of byMat) {
+    const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(list);
+    const mat = m.clone();
+    const cover = (spec.cover || []).filter((cv) => new RegExp(cv.mat).test(m.name));
+    for (const k of ["map", "emissiveMap"]) if (mat[k] && mat[k].image) mat[k] = shrink(mat[k], spec.tex || 512, k === "map" ? cover : []);
+    for (const k of ["normalMap", "roughnessMap", "metalnessMap", "aoMap"]) mat[k] = null; // 웹 무게를 줄이려고 색 지도만 남긴다
+    group.add(new THREE.Mesh(geo, mat));
+  }
+  // 앞을 +Z로 돌리고, 길이를 맞추고, 바닥을 y=0, 가운데를 원점에
+  group.rotation.y = spec.yaw || 0;
+  group.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(group), size = box.getSize(new THREE.Vector3());
+  const s = spec.length / size.z;
+  group.scale.setScalar(s); group.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(group);
+  const c = box.getCenter(new THREE.Vector3());
+  group.position.set(-c.x, -box.min.y, -c.z);
+  const root = new THREE.Group(); root.add(group); root.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(root); size = box.getSize(new THREE.Vector3());
+  window.__last = root;
+  let tris = 0; root.traverse((o) => { if (o.isMesh) tris += o.geometry.attributes.position.count / 3; });
+  return { info: { size: size.toArray().map((v) => +v.toFixed(2)), materials: [...byMat.keys()].map((m) => m.name), tris }, views: render(root) };
+};
+
+// 앞·뒤·옆·위에서 본 모습 (방향 확인용)
+function render(root) {
+  const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  r.setSize(480, 300); r.outputEncoding = THREE.sRGBEncoding;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdde3e8);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x666655, 1.2));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(5, 10, 7); scene.add(sun);
+  scene.add(root);
+  const cam = new THREE.PerspectiveCamera(35, 480 / 300, 0.1, 200);
+  const out = {};
+  for (const [name, p] of Object.entries({ front: [0, 1.4, 9], back: [0, 1.4, -9], side: [9, 1.4, 0], top: [0.01, 14, 0] })) {
+    cam.position.set(...p); cam.lookAt(0, 0.8, 0); r.render(scene, cam); out[name] = r.domElement.toDataURL("image/png");
+  }
+  scene.remove(root);
+  r.dispose();
+  return out;
+}
+
+// prepare 다음에 부르면 glb(base64)로 내보낸다
+window.exportLast = async () => {
+  const buf = await new Promise((ok) => new THREE.GLTFExporter().parse(window.__last, ok, { binary: true }));
+  let s = ""; const u = new Uint8Array(buf);
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+</script>
+</body>
+</html>
