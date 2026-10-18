@@ -60,8 +60,8 @@ const TRAFFIC = (() => {
     for (const rd of roads) {
       if (rd.br) continue; // 다리·고가 위 보도는 걷지 않는다 (사람은 지면에만 둔다)
       const hw = rd.w / 2;
-      // 보도 폭(rd.sw, 서울 보도 통계)이 있으면 보도 가운데보다 조금 바깥쪽을 걷는다
-      const side = rd.sw && rd.w >= 5 ? hw + rd.sw * 0.7 : rd.w >= WIDE ? hw + 2.9 : rd.w >= 5 ? hw + 0.6 : 0;
+      // 보도 폭(rd.sw, 서울 보도 통계)이 있으면 보도 가운데보다 조금 바깥쪽을 걷는다. 인도 없는 골목은 길 가장자리 안쪽을 걷는다
+      const side = rd.sw && rd.w >= 5 ? hw + rd.sw * 0.7 : rd.w >= WIDE ? hw + 2.9 : rd.w < CONFIG.NO_SIDEWALK_BELOW ? Math.max(0.5, hw - 0.35) : hw + 0.6;
       const offsets = rd.k === "plaza" ? [-hw / 2, hw / 2] : side ? [-side, side] : [];
       for (const o of offsets) {
         const S = offsetSamples(rd.pts, o, 2);
@@ -454,14 +454,18 @@ const TRAFFIC = (() => {
         if (ahead > 0 && ahead < 30 && side < 1.8) stopAt(ahead - car.halfL - o.halfL - 2.5);
       }
       // 플레이어와 길 위의 행인
-      const check = (x, z, r) => {
+      const check = (x, z, r, edge) => {
         const dx = x - car.x, dz = z - car.z, fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
         const ahead = dx * fx + dz * fz, side = Math.abs(-dx * fz + dz * fx);
-        if (ahead > 0 && ahead < 18 && side < car.halfW + r + 0.4) stopAt(ahead - car.halfL - r - 1.5);
+        if (!(ahead > 0 && ahead < 18 && side < car.halfW + r + 0.4)) return;
+        // 인도 없는 골목 가장자리를 걷는 사람과 차체가 겹치지 않으면 서지 않고 천천히 옆을 지나간다
+        if (edge && side > car.halfW + 0.2) { if (ahead < 8) limit = Math.min(limit, 1.5); return; }
+        stopAt(ahead - car.halfL - r - 1.5);
       };
       if ((car.y || 0) < 2) { // 고가 위를 달리는 차는 아래의 사람 때문에 서지 않는다
         check(player.x, player.z, CONFIG.PLAYER_RADIUS);
-        for (const p of peds) if (p.state !== "wait" && Math.abs(p.x - car.x) < 20 && Math.abs(p.z - car.z) < 20) check(p.x, p.z, 0.3);
+        const alley = !ln.wide && ln.rd.w < CONFIG.NO_SIDEWALK_BELOW;
+        for (const p of peds) if (p.state !== "wait" && Math.abs(p.x - car.x) < 20 && Math.abs(p.z - car.z) < 20) check(p.x, p.z, 0.3, alley);
       }
       return limit;
     }

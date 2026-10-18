@@ -46,6 +46,7 @@ async function initHome() {
   PEOPLE.load().catch((e) => console.warn("행인 모델을 불러오지 못해 단순한 모양을 씁니다:", e.message)); // 첫 화면을 보는 동안 미리 받는다
   VEHICLES.load().catch((e) => console.warn("차량 모델을 불러오지 못해 단순한 모양을 씁니다:", e.message));
   STREETPROPS.load().catch((e) => console.warn("거리 소품을 불러오지 못해 소품 없이 그립니다:", e.message));
+  SCENERY.load(); // 바닥·벽 사진 텍스처 (못 불러오면 코드로 그린 무늬)
   $("paper-title").textContent = PAPER.title;
   const list = $("credit-list");
   for (const [what, name, url] of SOUND_CREDITS) {
@@ -241,6 +242,7 @@ async function startRound() {
     await Promise.race([Promise.all([PEOPLE.load().catch(() => {}), VEHICLES.load().catch(() => {}), STREETPROPS.load().catch(() => {})]), new Promise((r) => setTimeout(r, 8000))]);
     setLoading(false);
   }
+  await Promise.race([SCENERY.load(), new Promise((r) => setTimeout(r, 3000))]);
   const withSound = state.order[state.round];
   $("play-label").textContent = `${state.round + 1}판 · ${withSound ? "소리 있음" : "소리 없음"}`;
   $("play-timer").textContent = `${Math.floor(CONFIG.ROUND_TIMEOUT_SEC / 60)}:00`;

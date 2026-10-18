@@ -27,6 +27,40 @@ const SCENERY = (() => {
     }
     g.putImageData(img, 0, 0);
   }
+  // ---------- 사진 텍스처 (Poly Haven CC0, assets/textures, tools/fetch_textures.mjs) ----------
+  // 사진의 밝기 무늬만 쓴다: 평균 밝기를 1로 맞춘 비율을 바탕색에 곱하고, 색은 지금처럼 건물·길마다 꼭짓점 색으로 곱한다.
+  // 못 불러오면 코드로 그린 무늬를 쓴다.
+  const PHOTO_IDS = ["asphalt_02", "square_concrete_pavers", "red_brick_03", "white_plaster_02", "concrete_wall_003", "rectangular_facade_tiles"];
+  const PHOTO = {};
+  let photoLoad = null;
+  function load() {
+    if (!photoLoad) photoLoad = Promise.all(PHOTO_IDS.map((id) => new Promise((res) => {
+      const img = new Image();
+      img.onload = () => { PHOTO[id] = img; res(); };
+      img.onerror = () => res();
+      img.src = `assets/textures/${id}.jpg`;
+    })));
+    return photoLoad;
+  }
+  // (0,0,w,h)를 사진 n×n장으로 채운다. base: 바탕색 [r,g,b], contrast: 무늬 세기(1이면 사진 그대로의 명암)
+  function photoFill(g, w, h, id, n, base, contrast) {
+    const img = PHOTO[id];
+    if (!img) return false;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const x0 = Math.round((i * w) / n), y0 = Math.round((j * h) / n);
+      g.drawImage(img, x0, y0, Math.round(((i + 1) * w) / n) - x0, Math.round(((j + 1) * h) / n) - y0);
+    }
+    const d = g.getImageData(0, 0, w, h), p = d.data;
+    let sum = 0;
+    for (let i = 0; i < p.length; i += 4) sum += p[i] * 0.3 + p[i + 1] * 0.59 + p[i + 2] * 0.11;
+    const mean = sum / (p.length / 4) || 1;
+    for (let i = 0; i < p.length; i += 4) {
+      const k = 1 + ((p[i] * 0.3 + p[i + 1] * 0.59 + p[i + 2] * 0.11) / mean - 1) * contrast;
+      p[i] = base[0] * k; p[i + 1] = base[1] * k; p[i + 2] = base[2] * k;
+    }
+    g.putImageData(d, 0, 0);
+    return true;
+  }
   const SIGN_COLORS = ["#d8342c", "#1f5fbf", "#f2c230", "#2e8b57", "#f07f1f", "#f4f1ea", "#7a2f8f", "#14324f"];
 
   function textures(renderer) {
@@ -35,8 +69,7 @@ const SCENERY = (() => {
     TEX = {
       // 창문 벽: 가로 4칸(칸당 3.2m) × 세로 4층(층당 3.3m)
       punched: canvasTex(512, 512, (g, w, h) => {
-        g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
-        noise(g, w, h, 10, 1);
+        if (!photoFill(g, w, h, "white_plaster_02", 6, [250, 250, 250], 0.5)) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h); noise(g, w, h, 10, 1); }
         for (let fy = 0; fy < 4; fy++) for (let fx = 0; fx < 4; fx++) {
           const x = fx * 128, y = fy * 128, r = hash(fx * 13 + fy * 7);
           g.fillStyle = "rgba(0,0,0,0.10)"; g.fillRect(x, y + 124, 128, 4);
@@ -52,8 +85,7 @@ const SCENERY = (() => {
       }, a),
       // 띠창 벽: 층마다 가로로 길게 이어진 창
       ribbon: canvasTex(512, 512, (g, w, h) => {
-        g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
-        noise(g, w, h, 8, 2);
+        if (!photoFill(g, w, h, "rectangular_facade_tiles", 6, [248, 248, 248], 0.6)) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h); noise(g, w, h, 8, 2); } // 타일 한 장 약 2m
         for (let fy = 0; fy < 4; fy++) {
           const y = fy * 128;
           const grd = g.createLinearGradient(0, y + 40, 0, y + 104);
@@ -91,11 +123,13 @@ const SCENERY = (() => {
       }, a),
       // 붉은 벽돌 벽 (80~90년대 다세대 주택): 창문 배치는 punched와 같다 (가로 4칸 × 세로 4층)
       brick: canvasTex(512, 512, (g, w, h) => {
-        g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
-        for (let r = 0; r < 64; r++) for (let c = 0; c < 17; c++) {
-          const v = hash(r * 41 + c * 13) * 30 - 15;
-          g.fillStyle = `rgb(${226 + v},${214 + v},${206 + v})`;
-          g.fillRect(c * 32 - (r % 2 ? 16 : 0) + 1, r * 8 + 1, 30, 6);
+        if (!photoFill(g, w, h, "red_brick_03", 13, [232, 222, 214], 0.8)) { // 사진 한 장 1m
+          g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
+          for (let r = 0; r < 64; r++) for (let c = 0; c < 17; c++) {
+            const v = hash(r * 41 + c * 13) * 30 - 15;
+            g.fillStyle = `rgb(${226 + v},${214 + v},${206 + v})`;
+            g.fillRect(c * 32 - (r % 2 ? 16 : 0) + 1, r * 8 + 1, 30, 6);
+          }
         }
         for (let fy = 0; fy < 4; fy++) for (let fx = 0; fx < 4; fx++) {
           const x = fx * 128, y = fy * 128;
@@ -110,11 +144,13 @@ const SCENERY = (() => {
       }, a),
       // 회색 블록 벽: 작은 창
       block: canvasTex(512, 512, (g, w, h) => {
-        g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
-        for (let r = 0; r < 32; r++) for (let c = 0; c < 9; c++) {
-          const v = hash(r * 23 + c * 7) * 18 - 9;
-          g.fillStyle = `rgb(${222 + v},${222 + v},${218 + v})`;
-          g.fillRect(c * 64 - (r % 2 ? 32 : 0) + 1, r * 16 + 1, 62, 14);
+        if (!photoFill(g, w, h, "concrete_wall_003", 4, [226, 226, 222], 0.7)) { // 사진 한 장 약 3m
+          g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
+          for (let r = 0; r < 32; r++) for (let c = 0; c < 9; c++) {
+            const v = hash(r * 23 + c * 7) * 18 - 9;
+            g.fillStyle = `rgb(${222 + v},${222 + v},${218 + v})`;
+            g.fillRect(c * 64 - (r % 2 ? 32 : 0) + 1, r * 16 + 1, 62, 14);
+          }
         }
         for (let fy = 0; fy < 4; fy++) for (let fx = 0; fx < 4; fx++) {
           if (hash(fx * 7 + fy * 5) < 0.35) continue;
@@ -132,8 +168,7 @@ const SCENERY = (() => {
       }, a),
       // 아파트: 층마다 발코니 난간 띠와 큰 창 (가로 4칸 × 세로 4층)
       apt: canvasTex(512, 512, (g, w, h) => {
-        g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
-        noise(g, w, h, 6, 11);
+        if (!photoFill(g, w, h, "white_plaster_02", 6, [250, 250, 250], 0.35)) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h); noise(g, w, h, 6, 11); }
         for (let fy = 0; fy < 4; fy++) {
           const y = fy * 128;
           const grd = g.createLinearGradient(0, y + 22, 0, y + 92);
@@ -157,10 +192,11 @@ const SCENERY = (() => {
         noise(g, w, h, 16, 12);
       }, a),
       roof: canvasTex(256, 256, (g, w, h) => {
-        g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h); noise(g, w, h, 26, 3);
+        if (!photoFill(g, w, h, "concrete_wall_003", 1, [245, 245, 245], 0.6)) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h); noise(g, w, h, 26, 3); }
         g.fillStyle = "rgba(0,0,0,0.08)"; for (let i = 0; i < 8; i++) g.fillRect(i * 32, 0, 2, h);
       }, a),
-      paving: canvasTex(256, 256, (g, w, h) => {
+      // 보도블록: 바닥 텍스처 한 장이 4m라 사진(1.8m)을 2×2장 넣는다
+      paving: PHOTO.square_concrete_pavers ? canvasTex(512, 512, (g, w, h) => photoFill(g, w, h, "square_concrete_pavers", 2, [170, 160, 148], 0.8), a) : canvasTex(256, 256, (g, w, h) => {
         g.fillStyle = "#a99f92"; g.fillRect(0, 0, w, h);
         for (let r = 0; r < 20; r++) for (let c = 0; c < 10; c++) {
           const v = hash(r * 31 + c * 7) * 14 - 7;
@@ -169,7 +205,7 @@ const SCENERY = (() => {
         }
         noise(g, w, h, 10, 4);
       }, a),
-      plaza: canvasTex(256, 256, (g, w, h) => {
+      plaza: PHOTO.square_concrete_pavers ? canvasTex(512, 512, (g, w, h) => photoFill(g, w, h, "square_concrete_pavers", 2, [205, 198, 187], 0.7), a) : canvasTex(256, 256, (g, w, h) => {
         g.fillStyle = "#cfc8bd"; g.fillRect(0, 0, w, h);
         for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
           const v = hash(r * 17 + c * 3) * 16 - 8;
@@ -177,7 +213,8 @@ const SCENERY = (() => {
         }
         noise(g, w, h, 8, 5);
       }, a),
-      asphalt: canvasTex(256, 256, (g, w, h) => { g.fillStyle = "#45484c"; g.fillRect(0, 0, w, h); noise(g, w, h, 22, 6); }, a),
+      // 아스팔트: 차도 텍스처 한 장이 6m라 사진(3m)을 2×2장 넣는다
+      asphalt: canvasTex(512, 512, (g, w, h) => { if (!photoFill(g, w, h, "asphalt_02", 2, [69, 72, 76], 0.9)) { g.fillStyle = "#45484c"; g.fillRect(0, 0, w, h); noise(g, w, h, 22, 6); } }, a),
       grass: canvasTex(256, 256, (g, w, h) => { g.fillStyle = "#6f8d4c"; g.fillRect(0, 0, w, h); noise(g, w, h, 34, 7); }, a),
       hedge: canvasTex(128, 128, (g, w, h) => {
         g.fillStyle = "#4f7038"; g.fillRect(0, 0, w, h); noise(g, w, h, 60, 8);
@@ -691,7 +728,9 @@ const SCENERY = (() => {
       const plaza = rd.k === "plaza";
       const B = plaza ? BPLAZA : BROAD;
       const y = plaza ? 0.03 : ROAD_LAYER + Math.min(rd.w, 30) * 0.0005;
-      const hw = rd.w / 2, s = plaza ? 4 : 6;
+      // 인도 없는 골목: 아스팔트를 건물 쪽으로 1m씩 넓히고 연석을 그리지 않는다
+      const bare = !plaza && rd.w < CONFIG.NO_SIDEWALK_BELOW;
+      const hw = rd.w / 2 + (bare ? 1 : 0), s = plaza ? 4 : 6;
       for (let i = 0; i < rd.pts.length - 1; i++) {
         const a = rd.pts[i], b = rd.pts[i + 1];
         const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
@@ -705,7 +744,7 @@ const SCENERY = (() => {
           triUp(B, p, [p[0] + Math.cos(a0) * hw, p[1] + Math.sin(a0) * hw], [p[0] + Math.cos(a1) * hw, p[1] + Math.sin(a1) * hw], y, s, ONE);
         }
       }
-      if (plaza) continue;
+      if (plaza || bare) continue;
       const S = sample(rd, 2);
       strip(S, -hw, 0.35, ROAD_LAYER + 0.025, CURB, false);
       strip(S, hw, 0.35, ROAD_LAYER + 0.025, CURB, false);
@@ -1195,5 +1234,5 @@ const SCENERY = (() => {
     };
   }
 
-  return { build, atmosphere };
+  return { build, atmosphere, load };
 })();

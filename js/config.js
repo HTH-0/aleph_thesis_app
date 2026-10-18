@@ -30,7 +30,8 @@ const CONFIG = {
   LANDMARK_MARGIN: 200,      // 지도 밖이라도 이 거리 안의 장소는 소리로 쓴다
 
   // 거리: 큰 차도와 신호
-  WIDE_ROAD: 10,             // 이 폭(m) 이상인 차도는 걸어서 들어갈 수 없다 (tools/build_maps.mjs의 WIDE_ROAD와 같다)
+  WIDE_ROAD: 10,
+  NO_SIDEWALK_BELOW: 8,      // 이 폭(m) 미만 차도는 인도 없는 골목으로 본다 (임시 규칙, 진행.md 인도 가정 분석). 연석 없이 그리고 행인은 길 가장자리로 걷는다             // 이 폭(m) 이상인 차도는 걸어서 들어갈 수 없다 (tools/build_maps.mjs의 WIDE_ROAD와 같다)
   SIGNAL_GREEN: 30,          // 한 방향 차량 초록불(초)
   SIGNAL_YELLOW: 3,          // 노란불(초). 이 동안은 모든 방향 보행 신호가 빨간불이다
   PED_FLASH: 5,              // 보행 초록불이 끝나기 전 깜빡이는 시간(초)
