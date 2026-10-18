@@ -56,11 +56,17 @@ npx serve -l 5173 .
 - 지도: © OpenStreetMap contributors, ODbL 1.0. `tools/build_maps.mjs`로 받아 `data/*.json`(이동 판정용 2m 격자, 장소 위치, 화면에 그릴 건물·도로·녹지·나무)으로 저장했습니다. 층수 기록이 없는 건물은 용도와 바닥 면적으로 높이를 추정하고, 건물이 없는 넓은 빈 땅에는 저층 건물을 채워 그립니다. 받은 OSM 원본은 `참고자료/osm_cache/`에 저장해 두고 다시 씁니다. 다시 만들려면 `node tools/build_maps.mjs`, OSM을 새로 받으려면 `node tools/build_maps.mjs --fresh`를 실행합니다.
 - 공공데이터 원본 받기: `node tools/fetch_public.mjs`가 횡단보도(서울·대구)와 서울 보도 통계를 `참고자료/공공데이터/`에 받습니다(로그인 필요 없음). 건물 파일만 직접 받습니다.
 - 소리: Pixabay Content License. 파일 목록과 주소는 [sounds/README.txt](sounds/README.txt)에 있습니다.
-- 개인정보: 앱은 기록을 서버로 보내지 않습니다. 음량 설정만 브라우저에 저장합니다.
+- 차량·자전거·킥보드·라바콘 3D 모델: Sketchfab 작가들의 CC BY 4.0 모델. 모델마다 이름·작가·주소가 `assets/cars/*.json`, `assets/props/*.json`에 있고 첫 화면 출처 목록에도 씁니다. 크기·방향·면 수·텍스처 해상도를 줄이고 차 색을 바꾸고 상표 로고와 번호판을 지웠습니다(`tools/convert_cars.mjs`, `tools/convert_props.mjs`). 다른 게임에서 빼 온 모델은 쓰지 않습니다.
+- 행인 3D 모델과 동작: [Microsoft Rocketbox Avatar Library](https://github.com/microsoft/Microsoft-Rocketbox), MIT License(`assets/people/LICENSE.md`). `tools/fetch_people.mjs`로 받고 `tools/convert_people.mjs`로 바꿉니다.
+- 거리 소품 3D 모델과 바닥·벽 사진 텍스처: [Poly Haven](https://polyhaven.com), CC0. `tools/fetch_props.mjs`, `tools/fetch_textures.mjs`로 받습니다.
+- 개인정보: 앱은 기록을 서버로 보내지 않습니다. 음량과 그래픽 품질 설정만 브라우저에 저장합니다.
 
 ## 환경 변수
 
-없습니다. API 키나 비밀값을 쓰지 않습니다.
+앱은 API 키나 비밀값을 쓰지 않습니다. 개발 도구만 저장소 맨 위 `.env`(커밋하지 않음)에서 읽습니다.
+
+- `SKETCHFAB_TOKEN`: `tools/fetch_models.mjs`가 Sketchfab 원본 모델을 받을 때
+- `KAKAO_JS_KEY`: `tools/check/review.mjs`(지도 검수 화면)가 카카오 지도·로드뷰를 띄울 때
 
 ## 폴더 구조
 
@@ -70,12 +76,20 @@ css/app.css       화면 스타일 (industry.css 위에 얹음)
 js/config.js      설정값, 소리 종류, 논문 수치
 js/world.js       지도 읽기, 소리 장소와 출발점·목적지 고르기
 js/sounds.js      3D 소리 재생
-js/scenery.js     3D 거리 풍경 (건물, 도로, 차선, 가로수, 하늘과 그림자)
+js/scenery.js     3D 거리 풍경 (건물, 도로, 차선, 가로수, 하늘과 그림자, 사진 텍스처)
+js/streetprops.js 거리 소품 배치 (실외기, 셔터, 가게 앞 물건, 전봇대, 소화전, 볼라드)
+js/people.js      행인 모델 불러오기와 옷 색 바꾸기
+js/vehicles.js    차량 모델 불러오기
 js/traffic.js     행인과 차량 (신호등을 따르고, 소리는 내지 않음)
 js/game.js        3D 길찾기 한 판
 js/main.js        화면 흐름과 결과
 data/             지역별 지도 (OpenStreetMap과 공공데이터로 만든 파일)
 sounds/           소리 파일
-tools/            지도 데이터 생성 (build_maps.mjs), 공공데이터 받기 (fetch_public.mjs), Shapefile 읽기 (shapefile.mjs)
+assets/people/    행인 모델 (Rocketbox, MIT)
+assets/cars/      차량 모델과 출처 (Sketchfab, CC BY 4.0)
+assets/props/     거리 소품 모델과 출처 (Poly Haven CC0, Sketchfab CC BY 4.0)
+assets/textures/  바닥·벽 사진 텍스처와 출처 (Poly Haven, CC0)
+tools/            지도 데이터 생성 (build_maps.mjs), 공공데이터 받기 (fetch_public.mjs), Shapefile 읽기 (shapefile.mjs),
+                  3D 모델·텍스처 받기와 변환 (fetch_*.mjs, convert_*.mjs)
 tools/check/      검증 스크립트 (사용법은 tools/check/README.md)
 ```
