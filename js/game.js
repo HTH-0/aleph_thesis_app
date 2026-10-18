@@ -136,6 +136,7 @@ function runRound(spec, onComplete) {
     window.__play = {
       exits: scenery.exits,
       traffic: () => traffic.stats(),
+      scenery: () => scenery.stats,
       peds: () => traffic.pedList(),
       cars: () => traffic.carList(),
       freeze(on) { frozen = !!on; },

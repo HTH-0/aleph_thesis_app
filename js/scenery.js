@@ -411,6 +411,7 @@ const SCENERY = (() => {
     const solids = makeIndex(12); // 충돌용 건물 다각형
     const polys = [];
     const labels = []; // 아파트 동 번호 { b, pts, h }
+    const bldList = []; // 거리 소품 배치용 건물 { pts, h, shop }
     // 외벽: 공공데이터의 구조(st)와 사용승인 연도(y)가 있으면 그것으로, 없으면 무작위로 고른다
     //  아파트 → 발코니 벽, 목조 저층 → 회벽 + 기와 우진각 지붕, 벽돌 → 붉은 벽돌, 블록·석조 → 회색 블록, 저층 철골 → 골함석 패널
     sc.buildings.forEach((b, i) => {
@@ -421,6 +422,8 @@ const SCENERY = (() => {
       const pick = (list) => aged(lin(list[Math.floor(r * list.length)]), b.y);
       const tint = isChurch ? lin(BRICK[Math.floor(r * BRICK.length)]) : pick(WALL_TINTS);
       let pitched = false;
+      // 거리 소품(js/streetprops.js) 배치에 쓴다: 벽에 실외기, 1층 상가에 셔터
+      if (!isRoof) bldList.push({ pts, h, shop: !isApt && !isWood && !isLow && !isChurch && area > 40 && h > SHOP_H + 2 });
       if (isRoof) {
         addWalls(BROOF, pts, 3.4, h, lin("#9b9d9f"), BAY, 4, FLOOR, 4, i, 1);
       } else {
@@ -1109,6 +1112,13 @@ const SCENERY = (() => {
     pole.castShadow = arm.castShadow = true;
     group.add(pole, arm, head);
 
+    // 거리 소품 (불러왔을 때만). 놓은 소품은 충돌 판정에 넣는다
+    const props = typeof STREETPROPS !== "undefined" && STREETPROPS.ready() ? STREETPROPS.place({
+      group, buildings: bldList, roads, crossings, conePos, kindAt, onCarway, clearOf, nearExit, hash, size, quality: CONFIG.QUALITY,
+      addObstacle: (x, z, r) => obstacles.add(x - r, z - r, x + r, z + r, { x, z, r }),
+    }) : null;
+    if (props && props.coneModel) coneMesh.count = baseMesh.count = 0; // 코드로 그린 라바콘 대신 모델
+
     scene.add(group);
 
     // 원(플레이어)이 건물 벽이나 나무 기둥에 닿는지 검사한다
@@ -1137,7 +1147,7 @@ const SCENERY = (() => {
     // 가장자리 가림막 앞인지 (안내 문구를 띄울 때 쓴다)
     const nearEdge = (x, z) => x < EDGE_BAND + 1.2 || z < EDGE_BAND + 1.2 || x > size - EDGE_BAND - 1.2 || z > size - EDGE_BAND - 1.2;
 
-    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, trees: trees.length, exits: exits.length },
+    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, trees: trees.length, exits: exits.length, props: props && props.counts },
       exits: exits.map(({ e, t0, t1 }) => { const [x, z] = e.along((t0 + t1) / 2); return { x, z, inward: e.inward, width: t1 - t0 }; }) };
   }
 

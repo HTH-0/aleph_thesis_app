@@ -1,5 +1,7 @@
 // 게임 전역 설정값. 숫자만 바꾸면 난이도와 소리 느낌을 조절할 수 있다.
 const CONFIG = {
+  QUALITY: "medium",       // 그래픽 품질 low·medium·high (첫 화면에서 고른다, js/main.js)
+
   // 이동과 시야
   EYE_HEIGHT: 1.6,
   PLAYER_RADIUS: 0.6,

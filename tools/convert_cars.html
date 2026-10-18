@@ -45,8 +45,12 @@ window.prepare = async (spec) => {
   src.updateMatrixWorld(true);
   // 재질별로 모든 메시를 세계 좌표로 합친다
   const byMat = new Map();
+  // keep/skip: 노드 이름(자신이나 부모)으로 고르기. 한 파일에 깨끗한 것과 녹슨·낙서 변형이 같이 들어 있는 소품에 쓴다
+  const names = (o) => { const s = []; for (let p = o; p; p = p.parent) s.push(p.name || ""); return s.join("/"); };
   src.traverse((o) => {
     if (!o.isMesh) return;
+    if (spec.keep && !new RegExp(spec.keep).test(names(o))) return;
+    if (spec.skip && new RegExp(spec.skip).test(names(o))) return;
     const mats = [].concat(o.material);
     const base = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
     base.applyMatrix4(o.matrixWorld);
@@ -71,13 +75,16 @@ window.prepare = async (spec) => {
     const cover = (spec.cover || []).filter((cv) => new RegExp(cv.mat).test(m.name));
     for (const k of ["map", "emissiveMap"]) if (mat[k] && mat[k].image) mat[k] = shrink(mat[k], spec.tex || 512, k === "map" ? cover : []);
     for (const k of ["normalMap", "roughnessMap", "metalnessMap", "aoMap"]) mat[k] = null; // 웹 무게를 줄이려고 색 지도만 남긴다
+    // tint: { mat: 재질 이름 정규식, color } 텍스처를 빼고 한 색으로 칠한다 (나무 전봇대 → 회색 콘크리트, 검은 봉투 → 흰 종량제 봉투)
+    for (const t of spec.tint || []) if (new RegExp(t.mat).test(m.name)) { mat.map = null; mat.color.set(t.color); if (t.roughness !== undefined) mat.roughness = t.roughness; }
     group.add(new THREE.Mesh(geo, mat));
   }
   // 앞을 +Z로 돌리고, 길이를 맞추고, 바닥을 y=0, 가운데를 원점에
   group.rotation.y = spec.yaw || 0;
   group.updateMatrixWorld(true);
   let box = new THREE.Box3().setFromObject(group), size = box.getSize(new THREE.Vector3());
-  const s = spec.length / size.z;
+  // 길이(length)나 높이(height)를 주면 그 크기로 맞추고, 아니면 원본 크기(Poly Haven은 m 단위)를 그대로 쓴다
+  const s = spec.length ? spec.length / size.z : spec.height ? spec.height / size.y : 1;
   group.scale.setScalar(s); group.updateMatrixWorld(true);
   box = new THREE.Box3().setFromObject(group);
   const c = box.getCenter(new THREE.Vector3());
