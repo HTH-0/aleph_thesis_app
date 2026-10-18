@@ -1,7 +1,7 @@
 // OpenStreetMap 데이터를 받아 게임용 지도(data/<id>.json)로 바꾼다.
 // 지도 파일에는 이동 판정용 격자와, 화면에 그릴 건물·도로·녹지·나무가 함께 들어간다.
 // 실행: node tools/build_maps.mjs            (모든 지역)
-//       node tools/build_maps.mjs mokdong    (한 지역만, 여러 개는 쉼표로)
+//       node tools/build_maps.mjs jamsil     (한 지역만, 여러 개는 쉼표로)
 //       node tools/build_maps.mjs --fresh    (저장해 둔 OSM 원본 대신 Overpass에서 새로 받는다)
 // 공공데이터(횡단보도, 보도 폭, 건물)는 참고자료/공공데이터/에 있어야 쓴다. 받는 방법은 tools/fetch_public.mjs와 README.md
 // 지도 데이터: © OpenStreetMap contributors, ODbL 1.0
@@ -30,13 +30,11 @@ const PUBLIC_SIDEWALKS = {
 };
 
 // 지역 목록. center는 지도 가운데, half는 지도 한 변의 절반(m), gu는 보도 통계에서 먼저 볼 관리 자치구.
+// 2026-10-18: 목동·고척·동성로는 뺐다(목동은 자료가 적고, 고척은 고가도로 1.7km와 비슷한 소리 둘, 동성로는 반월당과 겹친다).
 export const REGIONS = [
-  { id: "mokdong", city: "seoul", name: "목동", desc: "서울 · 목동야구장 · 아파트 단지", center: [37.5310, 126.8790], half: 420, gu: ["양천구"] },
   { id: "jamsil", city: "seoul", name: "잠실", desc: "서울 · 잠실종합운동장 · 아파트 단지", center: [37.5110, 127.0800], half: 420, gu: ["송파구"] },
-  { id: "gocheok", city: "seoul", name: "고척", desc: "서울 · 고척스카이돔 · 구로 골목", center: [37.4985, 126.8660], half: 420, gu: ["구로구", "양천구"] },
   { id: "worldcup", city: "seoul", name: "상암", desc: "서울 · 서울월드컵경기장 · 성산동", center: [37.5675, 126.8990], half: 420, gu: ["마포구"] },
   { id: "banwoldang", city: "daegu", name: "반월당", desc: "대구 · 반월당역 · 더현대 대구", center: [35.8655, 128.5934], half: 420 },
-  { id: "dongseongro", city: "daegu", name: "동성로", desc: "대구 · 동성로 · 국채보상운동기념공원", center: [35.8690, 128.6010], half: 420 },
   { id: "seomun", city: "daegu", name: "서문시장", desc: "대구 · 서문시장 · 대신동", center: [35.8691, 128.5800], half: 420 },
 ];
 

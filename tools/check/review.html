@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>사운드 워크 지도 검수</title>
+<link rel="stylesheet" href="/industry.css" />
+<style>
+  /* 검수 도구: 왼쪽 판정 패널, 가운데 우리 지도, 오른쪽 카카오 스카이뷰(위)·로드뷰(아래) */
+  :root { --yes: #2f8a57; --no: #c2453a; --unsure: #d08a2e; --edge: #ffd84a; --panel: 330px; }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; grid-template-rows: auto 1fr; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 14px; }
+  header { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--color-divider); }
+  header h1 { font-size: 20px; margin: 0; }
+  header select { font: inherit; padding: 4px 6px; }
+  header .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; margin-left: auto; }
+  .sw { display: inline-block; width: 18px; height: 4px; vertical-align: middle; margin-right: 4px; }
+  main { display: grid; grid-template-columns: var(--panel) 1fr 1fr; grid-template-rows: 1fr 1fr; min-height: 0; }
+  #panel { grid-row: 1 / 3; overflow-y: auto; border-right: 1px solid var(--color-divider); padding: 12px; display: grid; gap: 14px; align-content: start; }
+  #ours { grid-row: 1 / 3; position: relative; min-width: 0; background: #2b2e2a; }
+  #ours canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #kmap, #krv { position: relative; min-width: 0; border-left: 1px solid var(--color-divider); background: #ddd; }
+  #krv { border-top: 1px solid var(--color-divider); }
+  .pane-label { position: absolute; z-index: 5; left: 8px; top: 8px; background: rgba(20,22,26,.78); color: #fff; font-size: 12px; padding: 3px 8px; pointer-events: none; }
+  .pane-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; color: #333; z-index: 4; }
+  .tools { position: absolute; z-index: 5; right: 8px; top: 8px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .tools label { background: rgba(255,255,255,.92); padding: 2px 8px; font-size: 12px; cursor: pointer; }
+  h2 { font-size: 16px; margin: 0 0 6px; }
+  .progress { font-size: 12px; color: var(--color-neutral-700); }
+  ol#points { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  #points button { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 26px 1fr auto; gap: 6px; padding: 6px 8px; cursor: pointer; border: 1px solid var(--color-divider); background: var(--color-surface); }
+  #points button:hover, #points button:focus-visible { outline: 2px solid var(--color-accent); }
+  #points button[aria-current="true"] { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)); }
+  #points .n { font-family: var(--font-heading); font-size: 18px; }
+  #points .k { font-size: 12px; }
+  #points .done { font-size: 11px; color: var(--yes); white-space: nowrap; }
+  #spot { font-size: 12px; color: var(--color-neutral-700); line-height: 1.5; }
+  fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+  legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .opts label { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--color-divider); cursor: pointer; font-size: 13px; }
+  .opts label:has(input:checked) { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+  .opts kbd { margin-left: auto; font-size: 11px; color: var(--color-neutral-600); }
+  textarea { font: inherit; width: 100%; box-sizing: border-box; min-height: 54px; padding: 6px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #status { font-size: 12px; min-height: 1.2em; }
+  .hint { font-size: 12px; color: var(--color-neutral-700); line-height: 1.5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>지도 검수</h1>
+  <label>지역 <select id="region"></select></label>
+  <span class="progress" id="progress"></span>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--yes)"></i>인도 증거 있음</span>
+    <span><i class="sw" style="background:var(--no)"></i>인도 없음 추정</span>
+    <span><i class="sw" style="background:var(--unsure)"></i>애매(8~10m)</span>
+    <span><i class="sw" style="background:var(--edge)"></i>우리 도로 가장자리(스카이뷰 위)</span>
+  </div>
+</header>
+<main>
+  <section id="panel">
+    <div>
+      <h2>확인 지점</h2>
+      <ol id="points"></ol>
+      <p class="hint">우리 지도에서 아무 곳이나 클릭해도 그 자리를 볼 수 있습니다(직접 고른 지점).</p>
+    </div>
+    <form id="form">
+      <h2>판정</h2>
+      <p id="spot"></p>
+      <fieldset>
+        <legend>실제 인도</legend>
+        <div class="opts">
+          <label><input type="radio" name="sidewalk" value="both" id="sw-both" /> 양쪽 있음 <kbd>1</kbd></label>
+          <label><input type="radio" name="sidewalk" value="one" id="sw-one" /> 한쪽만 <kbd>2</kbd></label>
+          <label><input type="radio" name="sidewalk" value="none" id="sw-none" /> 없음 <kbd>3</kbd></label>
+          <label><input type="radio" name="sidewalk" value="unknown" id="sw-unknown" /> 모르겠음 <kbd>4</kbd></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>도로 폭 (노란 선과 실제 연석 비교)</legend>
+        <div class="opts">
+          <label><input type="radio" name="width" value="same" id="w-same" /> 비슷함 <kbd>Q</kbd></label>
+          <label><input type="radio" name="width" value="wider" id="w-wider" /> 실제가 더 넓음 <kbd>W</kbd></label>
+          <label><input type="radio" name="width" value="narrower" id="w-narrower" /> 실제가 더 좁음 <kbd>E</kbd></label>
+          <label><input type="radio" name="width" value="unknown" id="w-unknown" /> 모르겠음 <kbd>R</kbd></label>
+        </div>
+      </fieldset>
+      <label for="note">메모 (예: 차도 위치가 5m 남쪽으로 밀림, 주차장 통로임)</label>
+      <textarea id="note"></textarea>
+      <div class="row">
+        <button class="btn btn-primary" type="submit">저장하고 다음 (Enter)</button>
+        <span id="status" role="status"></span>
+      </div>
+      <p class="hint">로드뷰는 끌어서 둘러보고, 바닥의 화살표로 걸어갈 수 있습니다. 카카오 화면은 저장하지 않고, 고른 판정과 메모만 기록됩니다.</p>
+    </form>
+  </section>
+  <section id="ours">
+    <span class="pane-label">우리 게임 지도 · 휠로 확대, 끌어서 이동, 클릭하면 그 자리를 봅니다</span>
+    <canvas id="cv"></canvas>
+  </section>
+  <section id="kmap">
+    <span class="pane-label">카카오 스카이뷰</span>
+    <div class="tools">
+      <label><input type="checkbox" id="t-edges" checked /> 우리 도로 가장자리</label>
+      <label><input type="checkbox" id="t-rvlines" /> 로드뷰 있는 길</label>
+    </div>
+    <div id="kmap-el" style="position:absolute;inset:0"></div>
+    <div class="pane-msg" id="kmap-msg" hidden></div>
+  </section>
+  <section id="krv">
+    <span class="pane-label">카카오 로드뷰</span>
+    <div id="krv-el" style="position:absolute;inset:0"></div>
+    <div class="pane-msg" id="krv-msg" hidden></div>
+  </section>
+</main>
+
+<script>
+const KAKAO_KEY = "%%KAKAO_JS_KEY%%";
+const $ = (id) => document.getElementById(id);
+const COLORS = { yes: "#2f8a57", no: "#c2453a", unsure: "#d08a2e" };
+const KIND = { narrow: "좁은 골목", mid: "8~10m 길", cw: "횡단보도만 있는 좁은 길" };
+const SW = { both: "양쪽 있음", one: "한쪽만", none: "없음", unknown: "모르겠음" };
+const WD = { same: "폭 비슷", wider: "실제가 넓음", narrower: "실제가 좁음", unknown: "폭 모름" };
+
+const S = { region: null, d: null, rep: null, cls: new Map(), checks: [], cur: null, view: { s: 1, ox: 0, oy: 0 }, img: null, rvPan: null, rvPos: null, wantPan: null };
+let kmap = null, krv = null, krvc = null, kmarker = null, edgeLines = [], kakaoReady = false;
+
+// ---------- 좌표 (tools/build_maps.mjs와 같은 식) ----------
+function geo(d) {
+  const [lat0, lon0] = d.center, half = d.size / 2, mx = 111320 * Math.cos((lat0 * Math.PI) / 180);
+  return {
+    toLL: (x, z) => [lat0 - (z - half) / 110540, lon0 + (x - half) / mx],
+    fromLL: (lat, lon) => [(lon - lon0) * mx + half, -(lat - lat0) * 110540 + half],
+  };
+}
+const bearing = (tx, tz) => ((Math.atan2(tx, -tz) * 180) / Math.PI + 360) % 360; // 북쪽 0도, 시계 방향
+
+// ---------- 불러오기 ----------
+async function init() {
+  const regions = await (await fetch("/data/regions.json")).json();
+  for (const r of regions) $("region").append(new Option(`${r.name} (${r.id})`, r.id));
+  const want = new URLSearchParams(location.search).get("region");
+  $("region").value = regions.some((r) => r.id === want) ? want : "banwoldang";
+  $("region").addEventListener("change", () => loadRegion($("region").value));
+  S.checks = await (await fetch("/api/checks")).json();
+  initKakao();
+  await loadRegion($("region").value);
+}
+
+async function loadRegion(id) {
+  S.region = id;
+  history.replaceState(null, "", `?region=${id}`);
+  $("points").textContent = "불러오는 중…";
+  const [d, rep] = await Promise.all([fetch(`/data/${id}.json`).then((r) => r.json()), fetch(`/api/report?region=${id}`).then((r) => r.json())]);
+  S.d = d; S.rep = rep; S.g = geo(d);
+  S.cls = new Map(rep.roads.map((r) => [r.i, r]));
+  // 걷는 칸 격자를 한 번만 그림으로 만든다
+  const n = d.n, img = new ImageData(n, n);
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    const ch = d.grid[r][c], o = (r * n + c) * 4;
+    img.data.set(ch === "." ? [214, 212, 200, 255] : ch === "#" ? [96, 98, 112, 255] : ch === "=" ? [70, 72, 76, 255] : [43, 46, 42, 255], o);
+  }
+  const off = document.createElement("canvas"); off.width = off.height = n;
+  off.getContext("2d").putImageData(img, 0, 0);
+  S.img = off;
+  fitView();
+  renderList();
+  drawEdges();
+  if (rep.points.length) select(rep.points[0]); else draw();
+}
+
+// ---------- 확인 지점 목록과 판정 ----------
+const checkOf = (p) => S.checks.find((c) => c.point === p.id);
+function renderList() {
+  const ol = $("points"); ol.textContent = "";
+  for (const [k, p] of S.rep.points.entries()) {
+    const li = document.createElement("li"), b = document.createElement("button"), c = checkOf(p);
+    b.type = "button";
+    b.innerHTML = `<span class="n">${k + 1}</span><span class="k"></span><span class="done"></span>`;
+    b.querySelector(".k").textContent = `${KIND[p.kind]} · 폭 ${p.w}m · 경로 ${p.use}회`;
+    b.querySelector(".done").textContent = c ? `✓ ${SW[c.sidewalk] || ""}` : "";
+    b.setAttribute("aria-current", String(S.cur && S.cur.point === p.id));
+    b.addEventListener("click", () => select(p));
+    li.append(b); ol.append(li);
+  }
+  const done = S.rep.points.filter(checkOf).length;
+  $("progress").textContent = `확인 지점 ${done} / ${S.rep.points.length} 판정함 · 이 지역 직접 고른 지점 ${S.checks.filter((c) => c.region === S.region && !c.point).length}곳`;
+}
+
+function select(p) {
+  S.cur = { point: p.id, x: p.x, z: p.z, tx: p.tx, tz: p.tz, label: `${p.id} · ${KIND[p.kind]}`, reason: p.reason };
+  centerOn(p.x, p.z);
+  fillForm(checkOf(p));
+  showSpot();
+  renderList();
+  lookAt(p.x, p.z, p.tx, p.tz);
+}
+
+function selectFree(x, z) {
+  // 가장 가까운 차도의 방향으로 로드뷰를 돌린다
+  let best = null, bd = 30;
+  for (const rd of S.d.scenery.roads) for (let i = 0; i + 1 < rd.p.length; i++) {
+    const a = rd.p[i], b = rd.p[i + 1], dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz);
+    if (L < 0.01) continue;
+    const t = Math.max(0, Math.min(L, ((x - a[0]) * dx + (z - a[1]) * dz) / L));
+    const dd = Math.hypot(a[0] + (dx / L) * t - x, a[1] + (dz / L) * t - z);
+    if (dd < bd) { bd = dd; best = { tx: dx / L, tz: dz / L, w: rd.w }; }
+  }
+  S.cur = { point: null, x, z, tx: best ? best.tx : 0, tz: best ? best.tz : -1, label: "직접 고른 지점", reason: best ? `가까운 차도 폭 ${best.w}m` : "근처에 차도가 없습니다" };
+  fillForm(null);
+  showSpot();
+  renderList();
+  lookAt(x, z, S.cur.tx, S.cur.tz);
+}
+
+function showSpot() {
+  const c = S.cur, [lat, lon] = S.g.toLL(c.x, c.z);
+  $("spot").textContent = `${c.label} — ${c.reason} · 위치 ${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+}
+function fillForm(c) {
+  for (const el of document.querySelectorAll("#form input[type=radio]")) el.checked = !!c && (el.value === c[el.name]);
+  $("note").value = c ? c.note : "";
+  $("status").textContent = c ? `저장된 판정: ${SW[c.sidewalk] || "-"}, ${WD[c.width] || "-"}` : "";
+}
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!S.cur) return;
+  const sidewalk = (document.querySelector("input[name=sidewalk]:checked") || {}).value;
+  const width = (document.querySelector("input[name=width]:checked") || {}).value;
+  if (!sidewalk && !width && !$("note").value.trim()) { $("status").textContent = "인도나 도로 폭 가운데 하나는 골라 주세요."; return; }
+  const [lat, lon] = S.g.toLL(S.cur.x, S.cur.z);
+  const res = await fetch("/api/checks", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ region: S.region, point: S.cur.point, x: S.cur.x, z: S.cur.z, lat: +lat.toFixed(6), lon: +lon.toFixed(6), sidewalk, width, note: $("note").value }) });
+  if (!res.ok) { $("status").textContent = "저장하지 못했습니다. 검수 서버(review.mjs)가 켜져 있는지 확인해 주세요."; return; }
+  const rec = await res.json();
+  const k = rec.point ? S.checks.findIndex((c) => c.point === rec.point) : -1;
+  if (k >= 0) S.checks[k] = rec; else S.checks.push(rec);
+  $("status").textContent = "저장했습니다.";
+  renderList(); draw();
+  // 다음 판정 안 한 지점으로
+  const next = S.rep.points.find((p) => !checkOf(p));
+  if (next && S.cur.point) select(next);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+  const map = { Digit1: "sw-both", Digit2: "sw-one", Digit3: "sw-none", Digit4: "sw-unknown", KeyQ: "w-same", KeyW: "w-wider", KeyE: "w-narrower", KeyR: "w-unknown" };
+  if (map[e.code]) { $(map[e.code]).checked = true; e.preventDefault(); }
+  else if (e.code === "Enter") { $("form").requestSubmit(); e.preventDefault(); }
+});
+
+// ---------- 우리 지도 그리기 ----------
+const cv = $("cv"), g2 = cv.getContext("2d");
+function fitView() {
+  const r = cv.getBoundingClientRect();
+  S.view.s = Math.min(r.width, r.height) / S.d.size; S.view.ox = (r.width - S.d.size * S.view.s) / 2; S.view.oy = (r.height - S.d.size * S.view.s) / 2;
+}
+function centerOn(x, z) {
+  const r = cv.getBoundingClientRect();
+  S.view.s = Math.max(S.view.s, Math.min(r.width, r.height) / 180);
+  S.view.ox = r.width / 2 - x * S.view.s; S.view.oy = r.height / 2 - z * S.view.s;
+  draw();
+}
+const sx = (x) => S.view.ox + x * S.view.s, sy = (z) => S.view.oy + z * S.view.s;
+function draw() {
+  if (!S.d) return;
+  const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+  g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g2.fillStyle = "#2b2e2a"; g2.fillRect(0, 0, r.width, r.height);
+  g2.imageSmoothingEnabled = false;
+  g2.drawImage(S.img, sx(0), sy(0), S.d.size * S.view.s, S.d.size * S.view.s);
+  // 차도: 분류 색, 실제 폭으로
+  S.d.scenery.roads.forEach((rd, i) => {
+    if (rd.k !== "car") return;
+    const c = S.cls.get(i);
+    g2.strokeStyle = c ? COLORS[c.cls] : "#888";
+    g2.globalAlpha = 0.55; g2.lineWidth = Math.max(1, rd.w * S.view.s); g2.lineCap = "round"; g2.lineJoin = "round";
+    g2.beginPath(); rd.p.forEach(([x, z], k) => (k ? g2.lineTo(sx(x), sy(z)) : g2.moveTo(sx(x), sy(z)))); g2.stroke();
+  });
+  g2.globalAlpha = 1;
+  // 공공 횡단보도
+  g2.fillStyle = "#ffffff";
+  for (const cw of S.d.scenery.crosswalks || []) g2.fillRect(sx(cw.x) - 2, sy(cw.z) - 2, 4, 4);
+  // 판정한 직접 지점
+  for (const c of S.checks) if (c.region === S.region && !c.point) { g2.fillStyle = "#7fd3ff"; g2.beginPath(); g2.arc(sx(c.x), sy(c.z), 4, 0, 7); g2.fill(); }
+  // 확인 지점 번호
+  g2.font = "bold 12px sans-serif"; g2.textAlign = "center"; g2.textBaseline = "middle";
+  S.rep.points.forEach((p, k) => {
+    const done = !!checkOf(p), cur = S.cur && S.cur.point === p.id;
+    g2.fillStyle = cur ? "#ffffff" : done ? "#2f8a57" : "#ffd84a";
+    g2.beginPath(); g2.arc(sx(p.x), sy(p.z), cur ? 11 : 9, 0, 7); g2.fill();
+    g2.strokeStyle = "#111"; g2.lineWidth = 1.5; g2.stroke();
+    g2.fillStyle = "#111"; g2.fillText(String(k + 1), sx(p.x), sy(p.z) + 0.5);
+  });
+  // 로드뷰 위치와 보는 방향
+  const at = S.rvPos || (S.cur && [S.cur.x, S.cur.z]);
+  if (at) {
+    const [x, z] = at, px = sx(x), pz = sy(z);
+    if (S.rvPan !== null) {
+      const a = ((S.rvPan - 90) * Math.PI) / 180;
+      g2.fillStyle = "rgba(127,211,255,0.35)";
+      g2.beginPath(); g2.moveTo(px, pz); g2.arc(px, pz, 40, a - 0.5, a + 0.5); g2.closePath(); g2.fill();
+    }
+    g2.strokeStyle = "#7fd3ff"; g2.lineWidth = 2;
+    g2.beginPath(); g2.arc(px, pz, 6, 0, 7); g2.stroke();
+  }
+}
+// 휠 확대, 끌어서 이동, 클릭은 그 자리 보기
+cv.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const f = Math.exp(-e.deltaY * 0.0015), wx = (mx - S.view.ox) / S.view.s, wz = (my - S.view.oy) / S.view.s;
+  S.view.s = Math.max(0.3, Math.min(20, S.view.s * f)); S.view.ox = mx - wx * S.view.s; S.view.oy = my - wz * S.view.s;
+  draw();
+}, { passive: false });
+let drag = null;
+cv.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, ox: S.view.ox, oy: S.view.oy, moved: false }; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.hypot(dx, dy) > 4) drag.moved = true;
+  if (drag.moved) { S.view.ox = drag.ox + dx; S.view.oy = drag.oy + dy; draw(); }
+});
+cv.addEventListener("pointerup", (e) => {
+  const d = drag; drag = null;
+  if (!d || d.moved) return;
+  const r = cv.getBoundingClientRect(), x = (e.clientX - r.left - S.view.ox) / S.view.s, z = (e.clientY - r.top - S.view.oy) / S.view.s;
+  const hit = S.rep.points.find((p) => Math.hypot(sx(p.x) - (e.clientX - r.left), sy(p.z) - (e.clientY - r.top)) < 12);
+  if (hit) select(hit); else selectFree(x, z);
+});
+addEventListener("resize", draw);
+
+// ---------- 카카오 (공식 JavaScript API로 실시간 표시만 한다) ----------
+function kakaoMsg(text) { for (const id of ["kmap-msg", "krv-msg"]) { $(id).textContent = text; $(id).hidden = !text; } }
+function initKakao() {
+  if (!/^[0-9a-f]{32}$/.test(KAKAO_KEY)) { kakaoMsg("카카오 JavaScript 키가 없습니다. 저장소 맨 위 .env에 KAKAO_JS_KEY=... 를 넣고 검수 서버를 다시 켜 주세요."); return; }
+  const s = document.createElement("script");
+  s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
+  s.onerror = () => kakaoMsg("카카오 지도를 불러오지 못했습니다. 카카오 개발자 콘솔에서 이 주소가 JavaScript SDK 도메인으로 등록돼 있는지, 카카오맵 사용 설정이 켜져 있는지 확인해 주세요.");
+  s.onload = () => kakao.maps.load(() => {
+    kmap = new kakao.maps.Map($("kmap-el"), { center: new kakao.maps.LatLng(37.5, 127), level: 2, mapTypeId: kakao.maps.MapTypeId.HYBRID });
+    kmarker = new kakao.maps.Marker({ map: kmap, position: kmap.getCenter() });
+    krv = new kakao.maps.Roadview($("krv-el"));
+    krvc = new kakao.maps.RoadviewClient();
+    kakao.maps.event.addListener(krv, "position_changed", () => {
+      const p = krv.getPosition();
+      kmarker.setPosition(p); kmap.setCenter(p);
+      S.rvPos = S.g ? S.g.fromLL(p.getLat(), p.getLng()) : null; draw();
+    });
+    kakao.maps.event.addListener(krv, "viewpoint_changed", () => { S.rvPan = krv.getViewpoint().pan; draw(); });
+    kakao.maps.event.addListener(krv, "panoid_changed", () => { if (S.wantPan !== null) { krv.setViewpoint({ pan: S.wantPan, tilt: 0, zoom: 0 }); S.wantPan = null; } });
+    kakao.maps.event.addListener(kmap, "click", (ev) => { if (S.g) { const [x, z] = S.g.fromLL(ev.latLng.getLat(), ev.latLng.getLng()); selectFree(x, z); centerOn(x, z); } });
+    kakaoReady = true;
+    drawEdges();
+    if (S.cur) lookAt(S.cur.x, S.cur.z, S.cur.tx, S.cur.tz);
+  });
+  document.head.append(s);
+  $("t-edges").addEventListener("change", () => edgeLines.forEach((l) => l.setMap($("t-edges").checked ? kmap : null)));
+  $("t-rvlines").addEventListener("change", () => {
+    if (!kmap) return;
+    if ($("t-rvlines").checked) kmap.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW); else kmap.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+  });
+}
+// 우리 차도의 양쪽 가장자리를 스카이뷰 위에 노란 선으로 겹친다 (실제 연석과 맞는지 보려고)
+function drawEdges() {
+  if (!kakaoReady || !S.d) return;
+  edgeLines.forEach((l) => l.setMap(null)); edgeLines = [];
+  for (const rd of S.d.scenery.roads) {
+    if (rd.k !== "car") continue;
+    for (const side of [-1, 1]) {
+      const path = rd.p.map((p, k) => {
+        const a = rd.p[Math.max(0, k - 1)], b = rd.p[Math.min(rd.p.length - 1, k + 1)];
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / L, nz = (b[0] - a[0]) / L;
+        const [lat, lon] = S.g.toLL(p[0] + nx * side * rd.w / 2, p[1] + nz * side * rd.w / 2);
+        return new kakao.maps.LatLng(lat, lon);
+      });
+      edgeLines.push(new kakao.maps.Polyline({ map: $("t-edges").checked ? kmap : null, path, strokeWeight: 2, strokeColor: "#ffd84a", strokeOpacity: 0.9 }));
+    }
+  }
+}
+// 그 자리에서 가장 가까운 로드뷰를 열고, 길 방향을 보게 한다
+function lookAt(x, z, tx, tz) {
+  S.rvPos = null; S.rvPan = null; draw();
+  if (!kakaoReady) return;
+  const [lat, lon] = S.g.toLL(x, z), pos = new kakao.maps.LatLng(lat, lon);
+  kmap.setCenter(pos); kmarker.setPosition(pos);
+  S.wantPan = bearing(tx, tz);
+  krvc.getNearestPanoId(pos, 50, (panoId) => {
+    if (panoId === null) { $("krv-msg").textContent = "이 자리 50m 안에는 로드뷰가 없습니다. 스카이뷰로 판단하거나 가까운 다른 곳을 클릭해 주세요."; $("krv-msg").hidden = false; return; }
+    $("krv-msg").hidden = true;
+    krv.setPanoId(panoId, pos);
+  });
+}
+
+init();
+</script>
+</body>
+</html>
