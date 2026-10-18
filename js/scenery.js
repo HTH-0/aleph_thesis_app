@@ -558,6 +558,32 @@ const SCENERY = (() => {
       rd.junctions = rd.pts.filter((p) => { const e = nodeUse.get(keyOf(p)); return e && e.n >= 2; })
         .map((p) => { const node = nodeUse.get(keyOf(p)); return { x: p[0], z: p[1], trim: node.w / 2 + 2.5, node }; });
     }
+    // 다리·고가(OSM bridge, layer > 0): 지면 위로 띄운다. 다른 다리와 이어지는 끝은 높이를 유지하고,
+    // 지면 길과 이어지는 끝은 경사로로 내린다 (traffic.js의 차도 이 높이로 달린다)
+    const DECK_H = 6.5;
+    const brEnds = new Map();
+    for (const rd of roads) if (rd.br) for (const p of [rd.pts[0], rd.pts[rd.pts.length - 1]]) brEnds.set(keyOf(p), (brEnds.get(keyOf(p)) || 0) + 1);
+    const smooth = (u) => u * u * (3 - 2 * u);
+    for (const rd of roads) {
+      if (!rd.br) continue;
+      const cum = [0];
+      for (let i = 1; i < rd.pts.length; i++) cum.push(cum[i - 1] + Math.hypot(rd.pts[i][0] - rd.pts[i - 1][0], rd.pts[i][1] - rd.pts[i - 1][1]));
+      const L = cum[cum.length - 1], R = Math.max(8, Math.min(45, L * 0.45));
+      const rampA = brEnds.get(keyOf(rd.pts[0])) < 2, rampB = brEnds.get(keyOf(rd.pts[rd.pts.length - 1])) < 2;
+      rd.deck = { cum, at: (s) => DECK_H * Math.min(rampA ? smooth(Math.min(1, s / R)) : 1, rampB ? smooth(Math.min(1, (L - s) / R)) : 1) };
+    }
+    // 다리 위 한 점의 높이 (다리가 아니면 0)
+    function deckY(rd, x, z) {
+      if (!rd.deck) return 0;
+      let best = Infinity, sAt = 0;
+      for (let i = 0; i + 1 < rd.pts.length; i++) {
+        const a = rd.pts[i], b = rd.pts[i + 1], dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz;
+        const t = L2 > 0 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L2)) : 0;
+        const d = Math.hypot(a[0] + dx * t - x, a[1] + dz * t - z);
+        if (d < best) { best = d; sAt = rd.deck.cum[i] + t * Math.sqrt(L2); }
+      }
+      return rd.deck.at(sAt);
+    }
     function sample(rd, step) {
       const out = [];
       let d = 0;
@@ -608,7 +634,57 @@ const SCENERY = (() => {
       }
     }
     const nearest = (S, d) => S.reduce((best, s) => (Math.abs(s.d - d) < Math.abs(best.d - d) ? s : best), S[0]);
+
+    // 다리 상판: 아스팔트 윗면, 콘크리트 옆면·밑면·난간, 기둥. 경사로 가운데 낮은 부분(사람 키 높이)은 걸어서 지나가지 못하게 막는다
+    const BBRIDGE = buf(), CONCRETE = lin("#b4b3ad");
+    const pillarSpots = [], rampSegs = [];
+    function tri3(B, p, q, r, s, col) { // 위를 향하는 삼각형 (점은 [x, y, z])
+      if ((q[2] - p[2]) * (r[0] - p[0]) - (q[0] - p[0]) * (r[2] - p[2]) < 0) { const t = q; q = r; r = t; }
+      for (const v of [p, q, r]) vtx(B, v[0], v[1], v[2], 0, 1, 0, v[0] / s, -v[2] / s, col);
+    }
+    function wall3(B, a, b, a2, b2, nx, nz, col) { // a→b 아래 모서리, a2→b2 위 모서리
+      const L = Math.hypot(b[0] - a[0], b[2] - a[2]) / 4;
+      for (const [v, u, w] of [[a, 0, 0], [b2, L, 1], [b, L, 0], [a, 0, 0], [a2, 0, 1], [b2, L, 1]]) vtx(B, v[0], v[1], v[2], nx, 0, nz, u, w, col);
+    }
+    function drawDeck(rd) {
+      const hw = rd.w / 2, S = [];
+      for (let i = 0; i + 1 < rd.pts.length; i++) {
+        const a = rd.pts[i], b = rd.pts[i + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len < 0.01) continue;
+        const tx = (b[0] - a[0]) / len, tz = (b[1] - a[1]) / len, k = Math.max(1, Math.ceil(len / 4));
+        for (let j = 0; j < k; j++) S.push({ x: a[0] + tx * (len * j / k), z: a[1] + tz * (len * j / k), tx, tz, y: rd.deck.at(rd.deck.cum[i] + len * j / k) });
+        if (i === rd.pts.length - 2) S.push({ x: b[0], z: b[1], tx, tz, y: rd.deck.at(rd.deck.cum[i] + len) });
+      }
+      const side = (s, o, y) => [s.x - s.tz * o, y, s.z + s.tx * o];
+      for (let i = 0; i + 1 < S.length; i++) {
+        const s = S[i], t = S[i + 1], ys = s.y + ROAD_LAYER, yt = t.y + ROAD_LAYER;
+        tri3(BROAD, side(s, -hw, ys), side(t, -hw, yt), side(t, hw, yt), 6, ONE);
+        tri3(BROAD, side(s, -hw, ys), side(t, hw, yt), side(s, hw, ys), 6, ONE);
+        if (Math.max(s.y, t.y) < 0.3) continue; // 땅에 닿은 끝부분은 상판만
+        for (const sg of [-1, 1]) { // 옆면(상판 두께 0.9m)과 난간(0.9m)
+          const o = sg * (hw + 0.25);
+          wall3(BBRIDGE, side(s, o, Math.max(0, s.y - 0.9)), side(t, o, Math.max(0, t.y - 0.9)), side(s, o, s.y + 0.9), side(t, o, t.y + 0.9), -s.tz * sg, s.tx * sg, CONCRETE);
+        }
+        const yb = (y) => Math.max(0.02, y - 0.9); // 밑면
+        for (const [p, q, r] of [[side(s, -hw, yb(s.y)), side(t, hw, yb(t.y)), side(t, -hw, yb(t.y))], [side(s, -hw, yb(s.y)), side(s, hw, yb(s.y)), side(t, hw, yb(t.y))]])
+          for (const v of [p, q, r]) vtx(BBRIDGE, v[0], v[1], v[2], 0, -1, 0, v[0] / 4, v[2] / 4, CONCRETE);
+        const mid = (s.y + t.y) / 2;
+        if (mid > 0.25 && mid < 2.6) rampSegs.push({ a: [s.x, s.z], b: [t.x, t.z], hw: hw + 0.3 });
+      }
+      // 기둥: 높은 곳에 약 20m마다
+      let acc = 0;
+      for (let i = 1; i < S.length; i++) {
+        acc += Math.hypot(S[i].x - S[i - 1].x, S[i].z - S[i - 1].z);
+        if (acc < 20 || S[i].y < 3.5) continue;
+        acc = 0;
+        const s = S[i], c = 0.6, pts = [[s.x - c, s.z - c], [s.x + c, s.z - c], [s.x + c, s.z + c], [s.x - c, s.z + c]];
+        addWalls(BBRIDGE, pts, 0, s.y - 0.9, CONCRETE, 1.2, 1, 1, 1, i, 0.85);
+        pillarSpots.push([s.x, s.z]);
+      }
+    }
+
     for (const rd of roads) {
+      if (rd.br) { drawDeck(rd); continue; } // 다리는 연석·차선·횡단보도·가로수 없이 상판만 그린다
       const plaza = rd.k === "plaza";
       const B = plaza ? BPLAZA : BROAD;
       const y = plaza ? 0.03 : ROAD_LAYER + Math.min(rd.w, 30) * 0.0005;
@@ -694,7 +770,7 @@ const SCENERY = (() => {
       // 가장 가까운 큰 차도와, 30m 안의 교차로(없으면 이 횡단보도만의 신호)를 찾는다
       let rdBest = null, dBest = Infinity;
       for (const rd of roads) {
-        if (rd.k !== "car" || rd.w < CONFIG.WIDE_ROAD) continue;
+        if (rd.k !== "car" || rd.w < CONFIG.WIDE_ROAD || rd.br) continue; // 고가 위 차가 아래 횡단보도 신호에 서지 않게
         for (let i = 0; i < rd.pts.length - 1; i++) {
           const a = rd.pts[i], b = rd.pts[i + 1], dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz;
           if (L2 < 0.01) continue;
@@ -858,6 +934,7 @@ const SCENERY = (() => {
       group.add(m);
     }
     group.add(toMesh(BWATER, new THREE.MeshStandardMaterial({ color: lin("#5f8296"), roughness: 0.25, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })));
+    group.add(toMesh(BBRIDGE, std(T.roof, { side: THREE.DoubleSide, roughness: 0.95 }), true));
     group.add(toMesh(BPANEL, std(T.panel, { side: THREE.DoubleSide, roughness: 0.7 }), true));
     group.add(toMesh(BSTRIPE, std(T.stripes, { side: THREE.DoubleSide, roughness: 0.6 }), true));
     group.add(toMesh(BPOST, std(null, { roughness: 0.8 }), true));
@@ -993,6 +1070,9 @@ const SCENERY = (() => {
     });
     const trees = treeSpots.filter(([x, z]) => x > -250 && z > -250 && x < size + 250 && z < size + 250 && okSpot(x, z) && !nearExit(x, z));
     const obstacles = makeIndex(8);
+    for (const [x, z] of pillarSpots) obstacles.add(x - 0.9, z - 0.9, x + 0.9, z + 0.9, { x, z, r: 0.9 });
+    const rampIdx = makeIndex(12);
+    for (const s of rampSegs) rampIdx.add(Math.min(s.a[0], s.b[0]) - s.hw, Math.min(s.a[1], s.b[1]) - s.hw, Math.max(s.a[0], s.b[0]) + s.hw, Math.max(s.a[1], s.b[1]) + s.hw, s);
     const trunkGeo = new THREE.CylinderGeometry(0.13, 0.2, 3, 6); trunkGeo.translate(0, 1.5, 0);
     const crownGeo = new THREE.IcosahedronGeometry(2, 0); crownGeo.translate(0, 4.4, 0);
     const trunk = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: lin("#5b4a3c"), roughness: 1 }), Math.max(1, trees.length));
@@ -1045,6 +1125,7 @@ const SCENERY = (() => {
         for (let i = 0; i < p.pts.length; i++) if (segDist2(x, z, p.pts[i], p.pts[(i + 1) % p.pts.length]) < radius * radius) return true;
       }
       for (const o of obstacles.at(x, z)) if (Math.hypot(o.x - x, o.z - z) < o.r + radius) return true;
+      for (const s of rampIdx.at(x, z)) if (segDist2(x, z, s.a, s.b) < (s.hw + radius) ** 2) return true;
       return false;
     }
 
@@ -1056,7 +1137,7 @@ const SCENERY = (() => {
     // 가장자리 가림막 앞인지 (안내 문구를 띄울 때 쓴다)
     const nearEdge = (x, z) => x < EDGE_BAND + 1.2 || z < EDGE_BAND + 1.2 || x > size - EDGE_BAND - 1.2 || z > size - EDGE_BAND - 1.2;
 
-    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, stats: { buildings: polys.length, trees: trees.length, exits: exits.length },
+    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, trees: trees.length, exits: exits.length },
       exits: exits.map(({ e, t0, t1 }) => { const [x, z] = e.along((t0 + t1) / 2); return { x, z, inward: e.inward, width: t1 - t0 }; }) };
   }
 

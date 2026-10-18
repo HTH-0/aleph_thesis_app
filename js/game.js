@@ -149,6 +149,8 @@ function runRound(spec, onComplete) {
       // 높이 h(m)에서 내려다보기 (지붕·외벽 확인용). 다시 걷기 전에 teleport와 view(…, CONFIG.EYE_HEIGHT, …, 0)로 되돌린다
       view(x, z, h, y, p) { camera.position.set(x, h, z); yaw = y; pitch = p; },
       pos() { return { x: camera.position.x.toFixed(1), z: camera.position.z.toFixed(1), yaw: yaw.toFixed(2) }; },
+      // 마지막 프레임의 그리기 호출 수와 삼각형 수 (fps가 60에서 막힐 때 무게를 비교하려고)
+      perf() { return { fps: fpsText, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }; },
     };
   }
 
@@ -249,7 +251,8 @@ function runRound(spec, onComplete) {
             })
           : ["(소리 없음)"];
         const dg = Math.hypot(camera.position.x - goal.x, camera.position.z - goal.z);
-        hudEl.textContent = [...lines, `목적지까지 직선 ${dg.toFixed(0)}m`, fpsText, "P: 즉시 도착"].join("\n");
+        const ri = renderer.info.render;
+        hudEl.textContent = [...lines, `목적지까지 직선 ${dg.toFixed(0)}m`, `${fpsText} · 그리기 ${ri.calls}회 · 삼각형 ${Math.round(ri.triangles / 1000)}k`, "P: 즉시 도착"].join("\n");
       }
 
       if (Math.hypot(camera.position.x - goal.x, camera.position.z - goal.z) < CONFIG.GOAL_RADIUS) {

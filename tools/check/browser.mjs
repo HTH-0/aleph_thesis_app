@@ -24,8 +24,10 @@ function chromePath() {
 // 반환: { send, ev, shot, goto, close }
 export async function openBrowser(port = 9400) {
   mkdirSync(OUT, { recursive: true });
+  // 기본은 GPU 없이(SwiftShader) 그린다. CHECK_GPU=1이면 이 컴퓨터의 GPU로 그려서 실제에 가까운 fps를 잰다
+  const gl = process.env.CHECK_GPU === "1" ? ["--enable-gpu", "--ignore-gpu-blocklist"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
   const chrome = spawn(chromePath(), ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${join(OUT, "profile-" + port)}`,
-    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars", "--autoplay-policy=no-user-gesture-required",
+    ...gl, "--hide-scrollbars", "--autoplay-policy=no-user-gesture-required",
     "--window-size=1280,760", "about:blank"], { stdio: "ignore" });
   let target;
   for (let i = 0; i < 40 && !target; i++) {
