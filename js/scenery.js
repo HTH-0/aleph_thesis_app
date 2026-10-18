@@ -1195,7 +1195,8 @@ const SCENERY = (() => {
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
-    renderer.shadowMap.enabled = true;
+    const shadowSize = QUALITY_PRESETS[CONFIG.QUALITY].shadowMap; // 품질 낮음은 그림자 없음
+    renderer.shadowMap.enabled = shadowSize > 0;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const HORIZON = 0xdfe7ec;
@@ -1218,8 +1219,8 @@ const SCENERY = (() => {
     scene.add(new THREE.HemisphereLight(lin(0xd6e4f2), lin(0x7d7264), 0.85));
     const SUN_DIR = new THREE.Vector3(-0.55, 0.72, 0.42).normalize(); // 남서쪽 오후 햇빛
     const sun = new THREE.DirectionalLight(lin(0xfff0d6), 2.3);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.castShadow = shadowSize > 0;
+    sun.shadow.mapSize.set(shadowSize || 1024, shadowSize || 1024);
     sun.shadow.bias = -0.0003;
     sun.shadow.normalBias = 0.4;
     const sc = sun.shadow.camera;

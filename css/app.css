@@ -31,6 +31,8 @@ body { background: var(--color-bg); color: var(--color-text); font-family: var(-
 .sound-chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .sound-chip small { opacity: 0.65; }
 .volume { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; }
+.volume + .volume { margin-left: 24px; }
+.volume select { font: inherit; padding: 4px 8px; }
 
 .start-row { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
 .start-row .btn { padding: 12px 22px; font-size: 16px; }

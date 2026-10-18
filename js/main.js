@@ -60,6 +60,16 @@ async function initHome() {
   const fine = window.matchMedia && window.matchMedia("(pointer: fine)").matches;
   if (!fine) $("device-warning").hidden = false;
 
+  // 그래픽 품질: 주소의 ?quality=가 있으면 그것(점검용, 저장하지 않음), 없으면 지난번 선택
+  let quality = "medium";
+  try { quality = localStorage.getItem("soundwalk.quality") || quality; } catch (e) {}
+  const qParam = new URLSearchParams(location.search).get("quality");
+  $("quality").value = setQuality(qParam || quality);
+  $("quality").addEventListener("change", (e) => {
+    setQuality(e.target.value);
+    try { localStorage.setItem("soundwalk.quality", e.target.value); } catch (err) {}
+  });
+
   let vol = 0.8;
   try { const saved = parseFloat(localStorage.getItem("soundwalk.volume")); if (!Number.isNaN(saved)) vol = saved; } catch (e) {}
   $("volume").value = vol;

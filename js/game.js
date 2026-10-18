@@ -7,8 +7,8 @@ let _renderer = null;
 function getRenderer(canvas) {
   if (!_renderer) {
     _renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
-    _renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
   }
+  _renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY_PRESETS[CONFIG.QUALITY].pixelRatio)); // 판마다 품질 설정을 따른다
   _renderer.setSize(window.innerWidth, window.innerHeight);
   return _renderer;
 }

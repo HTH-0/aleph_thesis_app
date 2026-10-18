@@ -56,7 +56,8 @@ export async function openBrowser(port = 9400) {
     async key(code, down) { return send("Input.dispatchKeyEvent", { type: down ? "rawKeyDown" : "keyUp", code, key: code.replace(/^Key/, "").toLowerCase() }); },
     // 테스트 모드로 지역을 열고 첫 판을 시작한다 (출발 전 지도 → 출발 → 화면 클릭)
     async startRound(region, { seed = 3, briefShot = null } = {}) {
-      await send("Page.navigate", { url: `${BASE}?test=1&seed=${seed}&region=${region}` });
+      const q = process.env.CHECK_QUALITY ? `&quality=${process.env.CHECK_QUALITY}` : ""; // 그래픽 품질 low·medium·high
+      await send("Page.navigate", { url: `${BASE}?test=1&seed=${seed}&region=${region}${q}` });
       for (let i = 0; i < 40 && !(await ev(`!document.getElementById("btn-start").disabled`)); i++) await sleep(500);
       await ev(`document.getElementById("btn-start").click()`);
       await sleep(1200);

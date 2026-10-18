@@ -1,6 +1,6 @@
 // 게임 전역 설정값. 숫자만 바꾸면 난이도와 소리 느낌을 조절할 수 있다.
 const CONFIG = {
-  QUALITY: "medium",       // 그래픽 품질 low·medium·high (첫 화면에서 고른다, js/main.js)
+  QUALITY: "medium",       // 그래픽 품질 low·medium·high (첫 화면에서 고른다, js/main.js → setQuality)
 
   // 이동과 시야
   EYE_HEIGHT: 1.6,
@@ -45,6 +45,22 @@ const CONFIG = {
   CAR_SPEED: 10,             // 큰길 m/s (약 36km/h)
   CAR_SPEED_ALLEY: 4,        // 골목 m/s
 };
+
+// 그래픽 품질. 소리와 길찾기 조건은 바꾸지 않고 화면 부담만 바꾼다 (행인·차량은 소리를 내지 않는다).
+// pixelRatio: 화면 해상도 배율 상한, shadowMap: 그림자 지도 크기(0이면 그림자 없음), people·cars: 행인·차량 수.
+// 거리 소품 수는 js/streetprops.js가 QUALITY에 맞춰 줄이거나 늘린다(낮음 0.4배, 높음 1.3배).
+const QUALITY_PRESETS = {
+  low:    { label: "낮음", pixelRatio: 1,    shadowMap: 0,    people: 25, cars: 20 },
+  medium: { label: "보통", pixelRatio: 1.75, shadowMap: 2048, people: 60, cars: 35 },
+  high:   { label: "높음", pixelRatio: 2,    shadowMap: 4096, people: 80, cars: 45 },
+};
+function setQuality(q) {
+  const p = QUALITY_PRESETS[q] || QUALITY_PRESETS.medium;
+  CONFIG.QUALITY = QUALITY_PRESETS[q] ? q : "medium";
+  CONFIG.PEOPLE_MODELS = p.people;
+  CONFIG.CARS = p.cars;
+  return CONFIG.QUALITY;
+}
 
 // 장소 종류별 소리. group이 서로 다른 소리를 우선 골라 음색이 겹치지 않게 한다.
 // mode: "loop"는 loopStart~loopEnd(초)를 계속 반복, "pulse"는 interval(ms)마다 clip(초)만큼 재생한다.
