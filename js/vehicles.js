@@ -35,10 +35,23 @@ const VEHICLES = (() => {
         material.metalness = Math.min(material.metalness, 0.35);
         const paint = !!(src.paint && new RegExp(src.paint).test(o.material.name));
         if (paint) { material.color.set(0xffffff); material.roughness = Math.min(material.roughness, 0.4); } // 차마다 색을 곱한다
-        parts.push({ geometry, material, paint, matrix });
+        // 바퀴(변환할 때 앞축·뒤축으로 나눈 wheel_front·wheel_rear)는 축을 중심으로 굴린다
+        const axle = /^wheel_(front|rear)$/.test(o.name) ? o.name : null;
+        parts.push({ geometry, material, paint, matrix, axle, box: axle ? new THREE.Box3().setFromObject(o) : null });
       });
+      // 축 중심(좌우 바퀴를 합친 상자의 가운데)과 바퀴 반지름
+      const axles = {};
+      for (const p of parts) if (p.axle) (axles[p.axle] = axles[p.axle] || new THREE.Box3()).union(p.box);
+      let wheelR = 0;
+      for (const p of parts) {
+        if (!p.axle) continue;
+        const c = axles[p.axle].getCenter(new THREE.Vector3());
+        wheelR = Math.max(wheelR, axles[p.axle].max.y - c.y);
+        p.pivot = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z);
+        p.unpivot = new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z);
+      }
       const size = box.getSize(new THREE.Vector3());
-      return { ...t, parts, halfL: size.z / 2, halfW: size.x / 2, height: size.y, credit: src };
+      return { ...t, parts, wheelR, halfL: size.z / 2, halfW: size.x / 2, height: size.y, credit: src };
     }))).then((types) => (data = { types }));
     return promise;
   }

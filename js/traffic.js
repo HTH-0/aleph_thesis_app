@@ -263,7 +263,7 @@ const TRAFFIC = (() => {
       const types = lib.types.map((t) => ({ ...t, meshes: t.parts.map((p) => {
         const im = withColors(new THREE.InstancedMesh(p.geometry, p.material, NCAR), NCAR);
         im.count = 0; im.castShadow = true; im.frustumCulled = false; group.add(im);
-        return { im, paint: p.paint, matrix: p.matrix };
+        return { im, paint: p.paint, matrix: p.matrix, pivot: p.pivot, unpivot: p.unpivot };
       }) }));
       const byId = Object.fromEntries(types.map((t) => [t.id, t]));
       return {
@@ -279,11 +279,17 @@ const TRAFFIC = (() => {
           const n = {};
           for (const t of types) n[t.id] = 0;
           let ns = 0, nt = 0;
-          const local = new THREE.Matrix4(), m = new THREE.Matrix4();
+          const local = new THREE.Matrix4(), m = new THREE.Matrix4(), spin = new THREE.Matrix4();
           for (const car of cars) {
             const t = byId[car.model], k = n[t.id]++;
             base(car);
-            for (const { im, paint, matrix } of t.meshes) { m.multiplyMatrices(base.m, matrix); im.setMatrixAt(k, m); if (paint) im.setColorAt(k, car.color); }
+            for (const { im, paint, matrix, pivot, unpivot } of t.meshes) {
+              if (pivot) { // 바퀴: 굴러간 거리 / 반지름만큼 축(차의 X축)을 중심으로 돌린다
+                spin.makeRotationX((car.roll || 0) / t.wheelR);
+                m.multiplyMatrices(base.m, pivot).multiply(spin).multiply(unpivot).multiply(matrix);
+              } else m.multiplyMatrices(base.m, matrix);
+              im.setMatrixAt(k, m); if (paint) im.setColorAt(k, car.color);
+            }
             if (car.taxi) { local.makeTranslation(0, t.height + 0.12 - 1.58, -0.3); m.multiplyMatrices(base.m, local); sign.setMatrixAt(ns++, m); } // 지붕 택시 표시등
             if (car.braking || car.v < 0.3) for (const sx of [-1, 1]) { // 서 있거나 속도를 줄이는 차는 브레이크등을 켠다
               local.makeTranslation(sx * t.halfW * t.tail[0], t.height * t.tail[1], -t.halfL + 0.06); local.scale(LAMP); m.multiplyMatrices(base.m, local); tail.setMatrixAt(nt, m); tail.setColorAt(nt++, BRAKE);
@@ -505,6 +511,7 @@ const TRAFFIC = (() => {
         car.braking = target < car.v - 0.2;
         car.v += Math.max(-7 * dt, Math.min(2.5 * dt, target - car.v));
         if (car.v < 0) car.v = 0;
+        car.roll = (car.roll || 0) + car.v * dt; // 바퀴를 굴린 거리 (교차로 곡선에서도)
         if (car.trans) {
           // 교차로: 지금 차로 끝에서 다음 차로 시작까지, 교차로 가운데 쪽으로 휘는 곡선(2차 베지에)을 따라간다
           const tr = car.trans;
