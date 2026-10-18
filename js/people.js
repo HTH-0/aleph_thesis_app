@@ -15,31 +15,50 @@ const PEOPLE = (() => {
   ];
   const VARIANTS = 3; // 사람마다 원본 + 옷 색 변형 3개
   const MAX_SKIN = 0.35; // 몸 텍스처에서 피부로 판정된 블록이 이보다 많으면 옷 색 변형을 만들지 않는다
+  // 사람마다 다른 판정 기준 (2026-10-18 텍스처를 보고 정함)
+  // maxSkin: 민소매처럼 피부가 넓게 드러난 옷은 피부 비율이 높아도 옷과 구별되므로 상한을 올린다
+  // minSat: 피부색과 비슷한 회갈색 정장은 채도((최대-최소)/최대)가 낮은 색을 피부에서 뺀다
+  // skinAreas: minSat을 쓰지 않을 텍스처 구역 [x0, y0, x1, y1] (0~1, 손·다리처럼 채도가 낮은 피부가 있는 곳)
+  const PERSON = {
+    Female_Adult_03: { maxSkin: 0.6 },
+    Business_Female_03: { minSat: 0.38, skinAreas: [[0, 0.7, 0.32, 1], [0.68, 0.7, 1, 1], [0, 0, 0.31, 0.3], [0.69, 0, 1, 0.3]] },
+  };
   const skinShares = {}; // 사람별 피부 판정 비율 (테스트 확인용)
   let promise = null, data = null;
 
   const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
   // 피부로 볼 색 (널리 쓰는 RGB 규칙)
-  const isSkin = (r, g, b) => r > 95 && g > 40 && b > 20 && r > g && r > b && r - g > 15 && Math.max(r, g, b) - Math.min(r, g, b) > 15;
+  // 피부는 빨강 > 초록 ≥ 파랑 쪽이다(자홍·보라 옷이 피부로 잡히지 않게 초록 ≥ 파랑을 요구)
+  const isSkin = (r, g, b, minSat) => r > 95 && g > 40 && b > 20 && r > g && g >= b && r - g > 15 && Math.max(r, g, b) - Math.min(r, g, b) > Math.max(15, r * (minSat || 0));
 
   function recolor(image, outfit, seed) {
     const c = document.createElement("canvas");
     c.width = image.width; c.height = image.height;
     const g = c.getContext("2d");
     g.drawImage(image, 0, 0);
-    const px = g.getImageData(0, 0, c.width, c.height), d = px.data, W = c.width, H = c.height;
+    const px = g.getImageData(0, 0, c.width, c.height), d = px.data, W = c.width, H = c.height, rule = PERSON[seed] || {};
     // 피부 판정은 8px 블록 다수결로 한다. 픽셀마다 판정하면 피부색과 비슷한 옷(갈색 재킷 등)의 밝은 주름만 다시 칠해져 얼룩이 생긴다
     const B = 8, bw = Math.ceil(W / B), keep = new Uint8Array(bw * Math.ceil(H / B));
     for (let by = 0; by < H; by += B) for (let bx = 0; bx < W; bx += B) {
       let skin = 0, all = 0;
-      for (let y = by; y < Math.min(H, by + B); y++) for (let x = bx; x < Math.min(W, bx + B); x++) { const i = (y * W + x) * 4; all++; if (isSkin(d[i], d[i + 1], d[i + 2])) skin++; }
+      const u = bx / W, v = by / H, sat = (rule.skinAreas || []).some((a) => u >= a[0] && v >= a[1] && u < a[2] && v < a[3]) ? 0 : rule.minSat;
+      for (let y = by; y < Math.min(H, by + B); y++) for (let x = bx; x < Math.min(W, bx + B); x++) { const i = (y * W + x) * 4; all++; if (isSkin(d[i], d[i + 1], d[i + 2], sat)) skin++; }
       keep[(by / B) * bw + bx / B] = skin * 2 > all ? 1 : 0;
     }
+    // 주변 8블록 가운데 피부가 3개 미만인 외딴 피부 블록은 옷으로 본다 (옷 위에 갈색 점이 남지 않게)
+    const bh = Math.ceil(H / B), lone = [];
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      if (!keep[y * bw + x]) continue;
+      let n = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && keep[(y + dy) * bw + x + dx]) n++;
+      if (n < 3) lone.push(y * bw + x);
+    }
+    for (const k of lone) keep[k] = 0;
     const kept = (i) => { const p = i / 4, x = p % W, y = (p - x) / W; return keep[Math.floor(y / B) * bw + Math.floor(x / B)]; };
     // 옷이 피부색과 비슷하면(갈색·베이지 정장) 피부와 옷을 나눌 수 없어 얼룩이 생기므로 바꾸지 않는다
     const skinShare = keep.reduce((a, v) => a + v, 0) / keep.length;
     skinShares[seed] = +skinShare.toFixed(2);
-    if (skinShare > MAX_SKIN) return null;
+    if (skinShare > (rule.maxSkin || MAX_SKIN)) return null;
     // 옷 픽셀의 밝기 가운데값으로 진한 쪽과 밝은 쪽을 나눈다
     const ys = [];
     for (let i = 0; i < d.length; i += 64) if (!kept(i)) ys.push(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);

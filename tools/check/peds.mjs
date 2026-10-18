@@ -21,8 +21,7 @@ async function look(model, name, d = 3, side = 0) {
 }
 const ps = await b.ev("window.__play.peds()");
 // 자리 번호를 6으로 나눈 나머지가 같으면 같은 사람, 6 이상이면 바꾼 옷 (js/people.js, traffic.js의 자리 배정)
-// 0·3번 사람(갈색·베이지 정장 여성)은 옷 색 변형이 없어서 뺀다
-const varied = ps.find((p) => p.model >= 6 && (!process.argv[3] || p.model % 6 === +process.argv[3]) && [1, 2, 4, 5].includes(p.model % 6) && ps.some((q) => q.model === p.model % 6));
+const varied = ps.find((p) => p.model >= 6 && (!process.argv[3] || p.model % 6 === +process.argv[3]) && ps.some((q) => q.model === p.model % 6));
 if (varied) { await look(varied.model, "variant"); await look(varied.model % 6, "original"); }
 for (let t = 0; t < 30; t++) {
   const w = (await b.ev("window.__play.peds()")).find((p) => p.state === "wait");
