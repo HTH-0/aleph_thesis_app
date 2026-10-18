@@ -94,9 +94,34 @@ const PEOPLE = (() => {
     return promise;
   }
 
+  // 손 뼈 기준 휴대폰 위치(m)와 회전(라디안). 손 뼈의 X축이 손가락 쪽이다 (사진으로 맞춤)
+  let PHONE_AT = [0.09, 0.0, 0.0], PHONE_ROT = [0, 0, 0];
+  // 휴대폰을 보는 동작(*_cell_phone_*)일 때 오른손에 쥐여 주는 휴대폰 (검은 판, 화면은 약간 밝게)
+  let phoneParts = null;
+  function phoneMesh() {
+    if (!phoneParts) {
+      const geo = new THREE.BoxGeometry(0.075, 0.009, 0.155); // 폭 7.5cm, 두께 0.9cm, 길이 15.5cm
+      phoneParts = { geo, mats: [0x18191b, 0x18191b, 0x3b4a5c, 0x18191b, 0x18191b, 0x18191b].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.35 })) };
+    }
+    return new THREE.Mesh(phoneParts.geo, phoneParts.mats);
+  }
+
   // 복제 한 명. look: 0이면 원본 옷, 1~이면 바꾼 옷
+  // root.userData.phone: 오른손에 붙인 휴대폰 (traffic.js가 휴대폰 동작일 때만 보이게 한다)
   function makeOne(person, look) {
     const root = THREE.SkeletonUtils.clone(person.scene);
+    const hand = root.getObjectByName("Bip01_R_Hand");
+    if (hand) {
+      root.updateMatrixWorld(true);
+      const ws = hand.getWorldScale(new THREE.Vector3());
+      const phone = phoneMesh();
+      phone.scale.set(1 / ws.x, 1 / ws.y, 1 / ws.z); // 뼈에 남은 크기 배율을 되돌려 실제 크기로
+      phone.position.set(PHONE_AT[0] / ws.x, PHONE_AT[1] / ws.y, PHONE_AT[2] / ws.z);
+      phone.rotation.set(PHONE_ROT[0], PHONE_ROT[1], PHONE_ROT[2]);
+      phone.visible = false;
+      hand.add(phone);
+      root.userData.phone = phone;
+    }
     root.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true;
@@ -111,5 +136,5 @@ const PEOPLE = (() => {
     return root;
   }
 
-  return { load, ready: () => data, makeOne, FILES, skinShares };
+  return { load, ready: () => data, makeOne, FILES, skinShares, setPhone: (at, rot) => { PHONE_AT = at; PHONE_ROT = rot; } };
 })();

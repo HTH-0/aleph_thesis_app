@@ -196,14 +196,15 @@ const TRAFFIC = (() => {
         root.visible = false;
         group.add(root);
         const mixer = new THREE.AnimationMixer(root), set = lib.clips[person.g];
-        slots.push({ root, mixer, walk: set.walk.map((c) => mixer.clipAction(c)), idle: set.idle.map((c) => mixer.clipAction(c)), cur: null });
+        slots.push({ root, mixer, walk: set.walk.map((c) => mixer.clipAction(c)), idle: set.idle.map((c) => mixer.clipAction(c)), cur: null, phone: root.userData.phone });
         free.push(i);
       }
       return {
         size: slots.length,
         rootOf: (i) => slots[i] && slots[i].root, // 테스트 확인용
+        phoneOn: (i) => !!(slots[i] && slots[i].phone && slots[i].phone.visible),
         take() { return free.length ? free.splice(Math.floor(Math.random() * free.length), 1)[0] : -1; },
-        release(i) { const s = slots[i]; if (!s) return; s.root.visible = false; s.mixer.stopAllAction(); s.cur = null; free.push(i); },
+        release(i) { const s = slots[i]; if (!s) return; s.root.visible = false; s.mixer.stopAllAction(); s.cur = null; if (s.phone) s.phone.visible = false; free.push(i); },
         place(pd, dt) {
           const s = slots[pd.slot];
           s.root.visible = true;
@@ -216,6 +217,7 @@ const TRAFFIC = (() => {
             if (s.cur) want.crossFadeFrom(s.cur, 0.35, false);
             else want.time = Math.random() * want.getClip().duration; // 처음에는 동작 시점을 사람마다 다르게
             s.cur = want;
+            if (s.phone) s.phone.visible = /cell_phone/.test(want.getClip().name); // 휴대폰 동작일 때만 휴대폰을 든다
           }
           if (pd.moving) want.timeScale = pd.speed / WALK_SPEED;
           s.mixer.update(dt);
@@ -639,7 +641,7 @@ const TRAFFIC = (() => {
       pedList: () => peds.map((p) => {
         const r = crowd && crowd.rootOf(p.slot), w = new THREE.Vector3();
         if (r) r.children[0] && r.children[0].getWorldPosition(w);
-        return { x: +p.x.toFixed(1), z: +p.z.toFixed(1), yaw: +p.yaw.toFixed(2), state: p.state, moving: !!p.moving, model: crowd ? p.slot : -1,
+        return { x: +p.x.toFixed(1), z: +p.z.toFixed(1), yaw: +p.yaw.toFixed(2), state: p.state, moving: !!p.moving, model: crowd ? p.slot : -1, phone: !!(crowd && crowd.phoneOn(p.slot)),
           root: r ? [+r.position.x.toFixed(1), +r.position.z.toFixed(1), r.visible] : null, child: r ? [+w.x.toFixed(1), +w.y.toFixed(2), +w.z.toFixed(1)] : null };
       }),
       stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, lanes: lanes.length, crossings: scenery.crossings.length,
