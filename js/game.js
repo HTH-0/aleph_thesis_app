@@ -271,7 +271,7 @@ function runRound(spec, onComplete) {
     }
     updateSky();
     scenery.tick(now);
-    if (!frozen) traffic.update(dt, now / 1000, camera.position);
+    if (!frozen) traffic.update(dt, now / 1000, camera.position, yaw);
     renderer.render(scene, camera);
   }
   raf = requestAnimationFrame(animate);
