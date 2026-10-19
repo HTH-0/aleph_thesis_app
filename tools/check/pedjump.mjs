@@ -1,4 +1,5 @@
 // 행인이 한 프레임에 걷는 속도보다 크게 옮겨지는 횟수(순간이동)를 센다. 0이어야 한다
+// 막다른 곳에서 되돌아선 횟수와 다른 길로 이어 간 횟수도 1명이 1분에 몇 번인지로 보여 준다 (2026-10-19 고친 뒤 되돌아섬 0~0.1)
 // 먼저 서버를 띄운다: node tools/check/serve.mjs (또는 review.mjs)
 // 실행: CHECK_GPU=1 node tools/check/pedjump.mjs [지역1,지역2,... 기본 전체] [지점마다 관찰 초, 기본 20]
 // 출발점과 횡단보도 세 곳(넓은 곳, 중간, 좁은 곳)으로 옮겨 가며 지켜본다. seen은 플레이어 시야 안 60m에서 일어난 것이다
@@ -25,7 +26,8 @@ for (const region of regions) {
   }
   const t = await P("traffic()"), j = t.pedJumps, perf = await P("perf()");
   const seen = j.seen - j0.seen, unseen = j.unseen - j0.unseen;
-  console.log(`[${region}] 순간이동 시야 안 ${seen}회 · 시야 밖 ${unseen}회 (행인-프레임 ${j.frames - j0.frames}개) · 행인 ${t.peds} · 대기 ${t.waiting} · 건너는 중 ${t.crossing} · ${perf.fps}`);
+  const perMin = (k) => ((j[k] - j0[k]) / (t.peds * (secs * (pick.length + 1)) / 60)).toFixed(2);
+  console.log(`[${region}] 순간이동 시야 안 ${seen}회 · 시야 밖 ${unseen}회 (행인-프레임 ${j.frames - j0.frames}개) · 1명이 1분에 되돌아섬 ${perMin("deadEnd")}회, 다른 길로 이어 감 ${perMin("links")}회 · 행인 ${t.peds} · 대기 ${t.waiting} · 건너는 중 ${t.crossing} · ${perf.fps}`);
   bad += seen + unseen;
 }
 b.close();

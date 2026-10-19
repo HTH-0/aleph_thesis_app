@@ -56,6 +56,15 @@ const TRAFFIC = (() => {
 
     // ---------- 행인 길 ----------
     const walkable = (x, z) => kindAt(x, z) === 2 && !scenery.hits(x, z, 0.35);
+    // 두 점 사이를 0.5m 간격으로 보고 걸어서 지나갈 수 있는지 (장애물은 몸 반폭보다 조금 좁게 본다)
+    const clearLine = (a, b) => {
+      const n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.5);
+      for (let k = 1; k < n; k++) {
+        const x = a.x + ((b.x - a.x) * k) / n, z = a.z + ((b.z - a.z) * k) / n;
+        if (kindAt(x, z) !== 2 || scenery.hits(x, z, 0.25)) return false;
+      }
+      return true;
+    };
     const pedPaths = [];
     for (const rd of roads) {
       if (rd.br) continue; // 다리·고가 위 보도는 걷지 않는다 (사람은 지면에만 둔다)
@@ -67,13 +76,36 @@ const TRAFFIC = (() => {
         const S = offsetSamples(rd.pts, o, 2);
         let run = [];
         const flush = () => {
+          // 건너뛴 점 사이를 걷는 선이 막혀 있으면 그 자리에서 나눈다
+          for (let i = 1; i < run.length; i++) {
+            if (Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z) > 2.5 && !clearLine(run[i - 1], run[i])) {
+              const rest = run.splice(i);
+              flush();
+              run = rest;
+              i = 0;
+            }
+          }
           if (run.length >= 6) {
             for (let i = 0; i < run.length; i++) run[i].d = i === 0 ? 0 : run[i - 1].d + Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z);
             pedPaths.push({ pts: run, len: run[run.length - 1].d, events: [] });
           }
           run = [];
         };
-        for (const p of S) { if (walkable(p.x, p.z)) run.push({ x: p.x, z: p.z }); else flush(); }
+        // 가로수·가로등이나 건물 모서리에 걸리는 점은 길을 끊지 않고 옆으로 비켜 선 점을 쓴다.
+        // 비켜 설 자리가 없는 점은 건너뛰고, 3개(약 6m) 넘게 이어지면 그때 길을 끊는다
+        // (2026-10-19 측정: 나무마다 길이 끊겨 보행로 조각이 중간값 30m였고, 사람들이 조각 끝에서 되돌아서기를 되풀이했다)
+        let skipped = 0;
+        for (let i = 0; i < S.length; i++) {
+          const p = S[i], q = S[Math.min(S.length - 1, i + 1)], r = S[Math.max(0, i - 1)];
+          const tl = Math.hypot(q.x - r.x, q.z - r.z) || 1, nx = -(q.z - r.z) / tl, nz = (q.x - r.x) / tl;
+          let hit = walkable(p.x, p.z) ? p : null;
+          for (const sh of [0.6, -0.6, 1.1, -1.1, 1.6, -1.6]) {
+            if (hit) break;
+            if (walkable(p.x + nx * sh, p.z + nz * sh)) hit = { x: p.x + nx * sh, z: p.z + nz * sh };
+          }
+          if (hit) { run.push({ x: hit.x, z: hit.z }); skipped = 0; }
+          else if (++skipped > 2) flush();
+        }
         flush();
       }
     }
@@ -366,33 +398,36 @@ const TRAFFIC = (() => {
       const p = along(pd.path, s), L = Math.hypot(p.dx, p.dz) || 1;
       return { x: p.x - (p.dz / L) * pd.lat, z: p.z + (p.dx / L) * pd.lat };
     }
-    // 두 점 사이를 걸어서 갈 수 있는지 (1m 간격으로 걷는 칸인지 본다)
-    function walkLine(a, b) {
-      const n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z));
-      for (let k = 1; k < n; k++) if (!walkable(a.x + ((b.x - a.x) * k) / n, a.z + ((b.z - a.z) * k) / n)) return false;
-      return true;
-    }
     // 다른 길로 옮길 때는 순간이동하지 않고 그 길의 시작점까지 걸어간다(state "link")
     function linkTo(pd, path, s, dir) {
       pd.path = path; pd.s = s; pd.dir = dir;
       pd.link = pedSpot(pd, s); pd.state = "link";
     }
-    // 행인: 길 끝에서 걸어서 이어지는 다른 길로 옮기거나, 없으면 되돌아선다
-    function pedNextPath(pd) {
+    // 행인: 길 끝에서 15m 안의 다른 보행로(끝이든 중간이든)로 걸어가서 이어 간다. 이을 곳이 없을 때만 되돌아선다
+    // (끝끼리만 8m 안에서 이으면 T자 교차로와 끊긴 보도에서 막혀 1분에 0.4~1.3번씩 되돌아섰다, 2026-10-19 측정)
+    function pedNextPath(pd, radius = 15) {
       const end = pd.dir > 0 ? pd.path.pts[pd.path.pts.length - 1] : pd.path.pts[0];
       const here = { x: pd.x, z: pd.z };
       const hx = Math.sin(pd.yaw), hz = Math.cos(pd.yaw);
-      const opts = pedEnds.near(end.x, end.z, 8).filter((e) => pedPaths[e.pi] !== pd.path && walkLine(here, e));
-      if (!opts.length) { pd.dir = -pd.dir; return; }
-      // 거의 되돌아가는 방향은 피한다
-      const fwd = opts.filter((e) => {
-        const P = pedPaths[e.pi].pts, a = e.end === 0 ? P[0] : P[P.length - 1], b = e.end === 0 ? P[Math.min(2, P.length - 1)] : P[Math.max(0, P.length - 3)];
-        const l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-        return ((b.x - a.x) * hx + (b.z - a.z) * hz) / l > -0.3;
-      });
-      const o = pick(fwd.length ? fwd : opts);
-      const path = pedPaths[o.pi];
-      linkTo(pd, path, o.end === 0 ? 0 : path.len, o.end === 0 ? 1 : -1);
+      const cands = pedPoints.near(end.x, end.z, radius).filter((c) => pedPaths[c.pi] !== pd.path)
+        .map((c) => ({ c, d: Math.hypot(c.x - here.x, c.z - here.z) })).sort((p, q) => p.d - q.d);
+      const opts = [], seen = new Set();
+      for (const { c } of cands) {
+        if (seen.has(c.pi) || opts.length >= 4) continue;
+        // 새 길에서는 지금 걷던 방향과 가까운 쪽으로 간다. 옆으로 꺾이는 길(직각에 가까움)은 양쪽 중 아무 쪽이나 간다
+        const P = pedPaths[c.pi], p = along(P, c.s), l = Math.hypot(p.dx, p.dz) || 1, cos = (p.dx * hx + p.dz * hz) / l;
+        let dir = Math.abs(cos) < 0.3 ? (Math.random() < 0.5 ? 1 : -1) : cos > 0 ? 1 : -1;
+        if ((dir > 0 ? P.len - c.s : c.s) < 4) dir = -dir; // 그쪽으로 남은 길이 4m도 안 되면 반대쪽
+        if ((dir > 0 ? P.len - c.s : c.s) < 4) continue; // 아주 짧은 조각은 건너뛴다
+        if (!clearLine(here, c)) continue;
+        seen.add(c.pi);
+        opts.push({ c, dir });
+      }
+      if (!opts.length && radius < 25) return pedNextPath(pd, 25); // 가까이 없으면 조금 더 멀리 찾는다
+      if (!opts.length) { pd.dir = -pd.dir; pedJumps.deadEnd++; return; }
+      const o = pick(opts);
+      linkTo(pd, pedPaths[o.c.pi], o.c.s, o.dir);
+      pedJumps.links++;
     }
     // 횡단보도를 건넌 뒤 가까운 보행로로 걸어가서 붙는다
     function attachNear(pd, x, z) {
@@ -417,7 +452,7 @@ const TRAFFIC = (() => {
       pd.yaw += Math.max(-m, Math.min(m, d));
     }
 
-    const pedJumps = { seen: 0, unseen: 0, frames: 0 }; // 점검용 순간이동 횟수 (seen: 플레이어 시야 안 60m)
+    const pedJumps = { seen: 0, unseen: 0, frames: 0, deadEnd: 0, blockedTurn: 0, links: 0 }; // 점검용 순간이동 횟수 (seen: 플레이어 시야 안 60m)
     const view = { fx: 0, fz: -1 }; // 플레이어가 보는 방향 (게임이 update에 yaw로 넘긴다)
     // 플레이어 시야(앞쪽 약 140도) 안이고 d m 안이면 눈에 보이는 자리로 본다
     const inView = (x, z, player, d) => {
@@ -437,7 +472,7 @@ const TRAFFIC = (() => {
         if (pd.state === "walk") {
           if (playerAhead) {
             pd.blocked += dt;
-            if (pd.blocked > 2.5) { pd.dir = -pd.dir; pd.blocked = 0; }
+            if (pd.blocked > 2.5) { pd.dir = -pd.dir; pd.blocked = 0; pedJumps.blockedTurn++; }
           } else {
             pd.blocked = 0;
             const prev = pd.s;
@@ -704,7 +739,7 @@ const TRAFFIC = (() => {
         return { x: +p.x.toFixed(1), z: +p.z.toFixed(1), yaw: +p.yaw.toFixed(2), state: p.state, moving: !!p.moving, model: crowd ? p.slot : -1, phone: !!(crowd && crowd.phoneOn(p.slot)),
           root: r ? [+r.position.x.toFixed(1), +r.position.z.toFixed(1), r.visible] : null, child: r ? [+w.x.toFixed(1), +w.y.toFixed(2), +w.z.toFixed(1)] : null };
       }),
-      stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, lanes: lanes.length, crossings: scenery.crossings.length,
+      stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, pedPathLen: (() => { const l = pedPaths.map((p) => p.len).sort((a, b) => a - b); return [l[Math.floor(l.length * 0.25)], l[Math.floor(l.length * 0.5)], l[Math.floor(l.length * 0.75)]].map(Math.round); })(), lanes: lanes.length, crossings: scenery.crossings.length,
         waiting: peds.filter((p) => p.state === "wait").length, crossing: peds.filter((p) => p.state === "cross").length, carsStopped: cars.filter((c) => c.v < 0.3).length,
         offRoadPct: offRoad.samples ? +((offRoad.off / offRoad.samples) * 100).toFixed(1) : 0,
         bodyOffPct: offRoad.samples ? +((offRoad.body / offRoad.samples) * 100).toFixed(1) : 0, offRoadSamples: offRoad.samples, joins: joins.n, longJoins: joins.long, deadEnds: joins.noNext, pedJumps: { ...pedJumps } }), };
