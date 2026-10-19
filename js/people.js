@@ -107,6 +107,22 @@ const PEOPLE = (() => {
         .reduce((a, s) => new Set([...a].filter((n) => s.has(n))));
       for (const set of Object.values(clips)) for (const list of Object.values(set)) for (const c of list)
         c.tracks = c.tracks.filter((t) => common.has(THREE.PropertyBinding.parseTrackName(t.name).nodeName));
+      // 걷기 동작은 몸 중심(Bip01)이 한 주기마다 앞으로 1.2~1.6m 나아갔다가 주기가 끝나면 처음 자리로 돌아간다(루트 모션).
+      // 게임이 사람을 직접 옮기므로 그 전진분(처음과 끝 사이의 수평 이동)을 빼고, 빠진 거리로 동작 한 주기의 걸음 속도를 구한다.
+      // 빼지 않으면 사람이 1초쯤 앞으로 미끄러지다 뒤로 튀기를 되풀이한다 (2026-10-19 사용자 확인)
+      const hip = people[0].scene.getObjectByName("Bip01");
+      const unit = hip && hip.parent ? hip.parent.getWorldScale(new THREE.Vector3()).x : 1;
+      for (const set of Object.values(clips)) for (const c of set.walk) {
+        const tr = c.tracks.find((t) => t.name === "Bip01.position");
+        if (!tr) continue;
+        const v = tr.values, T = tr.times, n = T.length, dur = T[n - 1] - T[0] || 1;
+        const dx = v[(n - 1) * 3] - v[0], dz = v[(n - 1) * 3 + 2] - v[2];
+        for (let k = 0; k < n; k++) {
+          const f = (T[k] - T[0]) / dur;
+          v[k * 3] -= dx * f; v[k * 3 + 2] -= dz * f;
+        }
+        c.userData = { speed: (Math.hypot(dx, dz) * unit) / dur }; // m/s (키 배율 1 기준)
+      }
       data = { people, clips };
       return data;
     });

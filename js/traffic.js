@@ -235,6 +235,7 @@ const TRAFFIC = (() => {
         size: slots.length,
         rootOf: (i) => slots[i] && slots[i].root, // 테스트 확인용
         phoneOn: (i) => !!(slots[i] && slots[i].phone && slots[i].phone.visible),
+        clipOf: (i) => slots[i] && slots[i].cur ? [slots[i].cur.getClip().name, +slots[i].cur.timeScale.toFixed(2)] : null,
         take() { return free.length ? free.splice(Math.floor(Math.random() * free.length), 1)[0] : -1; },
         release(i) { const s = slots[i]; if (!s) return; s.root.visible = false; s.mixer.stopAllAction(); s.cur = null; if (s.phone) s.phone.visible = false; free.push(i); },
         place(pd, dt) {
@@ -251,7 +252,8 @@ const TRAFFIC = (() => {
             s.cur = want;
             if (s.phone) s.phone.visible = /cell_phone/.test(want.getClip().name); // 휴대폰 동작일 때만 휴대폰을 든다
           }
-          if (pd.moving) want.timeScale = pd.speed / WALK_SPEED;
+          // 걸음 속도에 맞춰 동작 빠르기를 바꾼다 (발이 땅에서 미끄러지지 않게). 동작마다 한 주기의 걸음 속도가 다르고, 키가 크면 보폭도 크다
+          if (pd.moving) want.timeScale = pd.speed / (((want.getClip().userData || {}).speed || WALK_SPEED) * s.root.scale.x);
           s.mixer.update(dt);
         },
       };
@@ -736,8 +738,10 @@ const TRAFFIC = (() => {
       pedList: () => peds.map((p) => {
         const r = crowd && crowd.rootOf(p.slot), w = new THREE.Vector3();
         if (r) r.children[0] && r.children[0].getWorldPosition(w);
+        const hip = r && r.getObjectByName("Bip01"), hw = new THREE.Vector3();
+        if (hip) hip.getWorldPosition(hw);
         return { x: +p.x.toFixed(1), z: +p.z.toFixed(1), yaw: +p.yaw.toFixed(2), state: p.state, moving: !!p.moving, model: crowd ? p.slot : -1, phone: !!(crowd && crowd.phoneOn(p.slot)),
-          root: r ? [+r.position.x.toFixed(1), +r.position.z.toFixed(1), r.visible] : null, child: r ? [+w.x.toFixed(1), +w.y.toFixed(2), +w.z.toFixed(1)] : null };
+          root: r ? [+r.position.x.toFixed(1), +r.position.z.toFixed(1), r.visible] : null, hipOff: hip ? +Math.hypot(hw.x - r.position.x, hw.z - r.position.z).toFixed(2) : null, clip: r && crowd.clipOf ? crowd.clipOf(p.slot) : null, child: r ? [+w.x.toFixed(1), +w.y.toFixed(2), +w.z.toFixed(1)] : null };
       }),
       stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, pedPathLen: (() => { const l = pedPaths.map((p) => p.len).sort((a, b) => a - b); return [l[Math.floor(l.length * 0.25)], l[Math.floor(l.length * 0.5)], l[Math.floor(l.length * 0.75)]].map(Math.round); })(), lanes: lanes.length, crossings: scenery.crossings.length,
         waiting: peds.filter((p) => p.state === "wait").length, crossing: peds.filter((p) => p.state === "cross").length, carsStopped: cars.filter((c) => c.v < 0.3).length,
