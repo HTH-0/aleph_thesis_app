@@ -1,0 +1,13 @@
+{
+  "name": "sound-walk-model-tools",
+  "private": true,
+  "description": "3D 모델을 게임용으로 줄이는 도구 (node tools/models/build_models.mjs). 게임 자체는 이 패키지를 쓰지 않는다",
+  "type": "module",
+  "dependencies": {
+    "@gltf-transform/core": "4.1.1",
+    "@gltf-transform/extensions": "4.1.1",
+    "@gltf-transform/functions": "4.1.1",
+    "meshoptimizer": "0.22.0",
+    "sharp": "0.33.5"
+  }
+}

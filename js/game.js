@@ -136,6 +136,7 @@ function runRound(spec, onComplete) {
     window.__play = {
       exits: scenery.exits,
       traffic: () => traffic.stats(),
+      scenery: () => scenery.stats,
       crossings: scenery.crossings.map((c) => ({ x: c.x, z: c.z, tx: c.tx, tz: c.tz, w: c.w })),
       kind: (x, z) => scenery.kindAt(x, z),
       teleport(x, z, y) {

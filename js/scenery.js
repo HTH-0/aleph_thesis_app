@@ -426,7 +426,8 @@ const SCENERY = (() => {
       } else {
         const minx = Math.min(...pts.map((p) => p[0])), maxx = Math.max(...pts.map((p) => p[0]));
         const minz = Math.min(...pts.map((p) => p[1])), maxz = Math.max(...pts.map((p) => p[1]));
-        const poly = { pts, minx, maxx, minz, maxz };
+        // res: 실외기·쓰레기봉투를 둘 만한 저층 주택류 (가게가 있으면 아래에서 shop으로 바뀐다)
+        const poly = { pts, minx, maxx, minz, maxz, i, res: !isApt && !isChurch && (isLow || isWood || b.st === "b" || b.st === "k" || h <= 16) };
         polys.push(poly);
         solids.add(minx, minz, maxx, maxz, poly);
         if (isApt) {
@@ -447,6 +448,8 @@ const SCENERY = (() => {
           addWalls(BG, pts, 0, h, lin(["#cfe0ea", "#bcd0db", "#d9e2e6"][Math.floor(r * 3)]), 3, 4, FLOOR, 4, i, 0.8);
         } else {
           const hasShop = !isLow && !isChurch && area > 40 && h > SHOP_H + 2;
+          poly.shop = hasShop; // 거리 소품을 놓을 때 쓴다 (가게 앞 상자·화분, 주택 옆 실외기)
+          if (hasShop) poly.res = false;
           // 구조가 있으면 벽돌·블록 벽, 없으면 창문 벽과 띠창 벽 가운데 하나 (2005년 이후 건물은 띠창을 더 자주)
           const [target, wallTint] = b.st === "b" && !isChurch ? [BBRICK, pick(BRICK_WALL)]
             : b.st === "k" ? [BBLOCK, tint]
@@ -1029,6 +1032,102 @@ const SCENERY = (() => {
     pole.castShadow = arm.castShadow = true;
     group.add(pole, arm, head);
 
+    // ---------- 거리 소품과 주차 차량 (모델은 js/props.js, 출처 assets/models/README.md) ----------
+    // 걷는 길을 막지 않게, 벽에서 3.2m 넘게 걸을 수 있는 자리에서만 벽에 붙여 둔다. 자리는 건물·도로 번호로 정해져 판마다 같다.
+    const propItems = [], propIdx = makeIndex(6);
+    const nearMap = (x, z) => x > -40 && z > -40 && x < size + 40 && z < size + 40;
+    const put = (name, x, z, yaw, r, solid, extra) => {
+      // 지도 끝 출구 앞과 지도 안쪽 가장자리 8m 띠는 비워 둔다 (가림막까지 걸어가 부딪힐 수 있게)
+      const inStrip = x > -2 && z > -2 && x < size + 2 && z < size + 2 && (x < 8 || z < 8 || x > size - 8 || z > size - 8);
+      if (inStrip || nearExit(x, z)) return false;
+      if (propIdx.at(x, z).some((o) => Math.hypot(o.x - x, o.z - z) < o.r + r)) return false;
+      if (obstacles.at(x, z).some((o) => Math.hypot(o.x - x, o.z - z) < o.r + r + 0.3)) return false;
+      propItems.push(Object.assign({ name, x, z, yaw, r, solid }, extra));
+      propIdx.add(x - r, z - r, x + r, z + r, { x, z, r });
+      return true;
+    };
+    const SHOP_ITEMS = ["crate", "cardboard", "crate", "potted_plant", "planter", "chair", "potted_plant"];
+    for (const p of polys) {
+      if (!nearMap(p.minx, p.minz) && !nearMap(p.maxx, p.maxz)) continue;
+      const pts = p.pts, i = p.i;
+      for (let j = 0; j < pts.length; j++) {
+        const a = pts[j], b = pts[(j + 1) % pts.length], dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
+        if (len < 2.5) continue;
+        const nx = dz / len, nz = -dx / len, yawOut = Math.atan2(nx, nz), r = hash(i * 13.7 + j * 3.1);
+        const at = (t, off) => [a[0] + dx * t + nx * off, a[1] + dz * t + nz * off];
+        const clear = (t, depth) => { const q1 = at(t, 0.9), q2 = at(t, depth); return okSpot(q1[0], q1[1]) && okSpot(q2[0], q2[1]); };
+        if (p.shop) {
+          if (r < 0.3 && clear(0.5, 3.4)) {
+            const k = 1 + Math.floor(hash(i * 5.3 + j) * 3);
+            for (let q = 0; q < k; q++) {
+              const t = Math.min(0.9, 0.2 + q * (1.1 / len)), [x, z] = at(t, 0.55);
+              put(SHOP_ITEMS[Math.floor(hash(i * 3.3 + j * 1.7 + q) * SHOP_ITEMS.length)], x, z, yawOut + (hash(i + q * 9.1) - 0.5) * 0.8, 0.32, true);
+            }
+          } else if (r < 0.37 && len >= 3.5 && clear(0.5, 4.8)) {
+            const [x, z] = at(0.5, 1.3); put("table_set", x, z, yawOut + Math.PI / 2, 0.9, true);
+          } else if (r < 0.45 && len >= 3 && clear(0.5, 2.5)) {
+            const [x, z] = at(0.5, 0.17); put("shutter", x, z, yawOut, 0.1, false, { sx: Math.min(len * 0.7, 3.2) / 1.08, sy: 1.1 });
+          }
+        } else if (p.res) {
+          if (r < 0.16 && clear(0.5, 3.2)) {
+            const [x, z] = at(0.2 + hash(i * 5.1 + j) * 0.6, 0.25); put("aircon", x, z, yawOut, 0.42, true);
+          } else if (r < 0.23 && clear(0.12, 3.2)) {
+            const k = 2 + Math.floor(hash(i * 7.7 + j) * 2);
+            for (let q = 0; q < k; q++) { const [x, z] = at(Math.min(0.5, 0.06 + q * 0.4 / len), 0.35 + (q % 2) * 0.35); put("trashbag", x, z, hash(i + q) * 6.28, 0.28, true); }
+          } else if (r < 0.26 && clear(0.5, 3.2)) {
+            const [x, z] = at(0.5, 0.25); put("utility_box", x, z, yawOut, 0.3, true);
+          } else if (r < 0.28 && clear(0.5, 3.2)) {
+            const [x, z] = at(0.5, 0.45); put("hand_truck", x, z, yawOut + Math.PI, 0.35, true);
+          }
+        }
+      }
+    }
+    // 큰길 보도: 소화전(연석 쪽 약 120m마다), 큰 분전함(건물 쪽 약 170m마다). 좁은 골목(4.5m 남짓): 덮개 씌운 주차 차량
+    for (const rd of roads) {
+      if (rd.k !== "car" || rd.br) continue;
+      const hw = rd.w / 2, pts = rd.pts;
+      const cum = [0];
+      for (let q = 1; q < pts.length; q++) cum.push(cum[q - 1] + Math.hypot(pts[q][0] - pts[q - 1][0], pts[q][1] - pts[q - 1][1]));
+      const L = cum[cum.length - 1];
+      const pos = (s, off) => {
+        let q = 1; while (q < pts.length - 1 && cum[q] < s) q++;
+        const a = pts[q - 1], b = pts[q], seg = Math.max(0.01, cum[q] - cum[q - 1]), t = (s - cum[q - 1]) / seg;
+        const tx = (b[0] - a[0]) / seg, tz = (b[1] - a[1]) / seg;
+        return { x: a[0] + (b[0] - a[0]) * t - tz * off, z: a[1] + (b[1] - a[1]) * t + tx * off, yaw: Math.atan2(tx, tz) };
+      };
+      const seed = hash(pts[0][0] * 0.37 + pts[0][1] * 0.11);
+      const okAt = (p) => nearMap(p.x, p.z) && okSpot(p.x, p.z);
+      // 주차 차량은 골목 노면 위에 서므로, 차도 위인지는 보지 않는다
+      const okPark = (p) => { const k = cellKind(p.x, p.z); return nearMap(p.x, p.z) && (k === 2 || k === -1) && !insideSolid(p.x, p.z) && clearOf(p.x, p.z); };
+      if (rd.w >= CONFIG.WIDE_ROAD) {
+        for (let s = 30 + seed * 90; s < L - 10; s += 120) {
+          const side = hash(s * 0.13 + seed) < 0.5 ? -1 : 1, p = pos(s, side * (hw + 0.7));
+          if (okAt(p)) put("hydrant", p.x, p.z, p.yaw + (side > 0 ? Math.PI / 2 : -Math.PI / 2), 0.25, true);
+        }
+        for (let s = 60 + seed * 110; s < L - 10; s += 170) {
+          const side = hash(s * 0.29 + seed) < 0.5 ? -1 : 1, p = pos(s, side * (hw + (rd.sw || 4) - 0.6));
+          if (okAt(p)) put("utility_box_big", p.x, p.z, p.yaw + (side > 0 ? -Math.PI / 2 : Math.PI / 2), 0.5, true);
+        }
+      } else if (rd.w < 5 && L > 25) {
+        for (let s = 10 + seed * 30; s < L - 10; s += 40) {
+          if (hash(s * 0.71 + seed * 3) > 0.3) continue;
+          const side = hash(s * 0.19 + seed) < 0.5 ? -1 : 1, p = pos(s, side * (hw - 0.95));
+          const f = pos(s + 2, side * (hw - 0.95)), bk = pos(s - 2, side * (hw - 0.95));
+          if (okPark(p) && okPark(f) && okPark(bk)) put("covered_car", p.x, p.z, p.yaw, 1.1, true);
+        }
+      }
+    }
+    // 모델을 다 불러온 뒤에 그리고, 그때 충돌 판정에도 넣는다 (모델을 못 불러오면 보이지 않는 장애물이 생기지 않게)
+    const propsReady = PROPS.load().then((models) => {
+      for (const it of propItems) if (it.solid && models.has(it.name)) {
+        if (it.name === "covered_car") {
+          // 차는 길이 방향으로 원 세 개
+          for (const o of [-1.4, 0, 1.4]) { const x = it.x + Math.sin(it.yaw) * o, z = it.z + Math.cos(it.yaw) * o; obstacles.add(x - 1, z - 1, x + 1, z + 1, { x, z, r: 1.0 }); }
+        } else obstacles.add(it.x - it.r, it.z - it.r, it.x + it.r, it.z + it.r, { x: it.x, z: it.z, r: it.r });
+      }
+      return PROPS.place(group, propItems, models);
+    });
+
     scene.add(group);
 
     // 원(플레이어)이 건물 벽이나 나무 기둥에 닿는지 검사한다
@@ -1056,7 +1155,8 @@ const SCENERY = (() => {
     // 가장자리 가림막 앞인지 (안내 문구를 띄울 때 쓴다)
     const nearEdge = (x, z) => x < EDGE_BAND + 1.2 || z < EDGE_BAND + 1.2 || x > size - EDGE_BAND - 1.2 || z > size - EDGE_BAND - 1.2;
 
-    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, stats: { buildings: polys.length, trees: trees.length, exits: exits.length },
+    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, stats: { buildings: polys.length, trees: trees.length, exits: exits.length, props: propItems.length, propsByType: propItems.reduce((a, it) => ((a[it.name] = (a[it.name] || 0) + 1), a), {}),
+      propSamples: propItems.filter((it) => it.x > 50 && it.z > 50 && it.x < size - 50 && it.z < size - 50).reduce((a, it) => (a[it.name] || (a[it.name] = { x: it.x, z: it.z, yaw: it.yaw }), a), {}) }, propsReady,
       exits: exits.map(({ e, t0, t1 }) => { const [x, z] = e.along((t0 + t1) / 2); return { x, z, inward: e.inward, width: t1 - t0 }; }) };
   }
 
