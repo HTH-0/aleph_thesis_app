@@ -159,7 +159,7 @@ const PEOPLE = (() => {
     }
     root.traverse((o) => {
       if (!o.isMesh) return;
-      o.castShadow = true;
+      o.castShadow = false; // 그림자 지도는 움직이지 않는 것만 그린다. 사람 그림자는 traffic.js가 발밑에 둥근 그림자로 그린다
       o.frustumCulled = false; // 걷는 동작으로 바뀐 자세는 원래 경계 상자를 벗어날 수 있다
       if (look && person.looks[look]) o.material = [].concat(o.material).map((m) => {
         if (m.name !== person.bodyName) return m;

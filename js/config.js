@@ -40,7 +40,7 @@ const CONFIG = {
   NPC_RADIUS: 150,           // 이 거리(m) 안에서만 행인·차량을 둔다
   PEDESTRIANS: 120,          // 행인 모델(js/people.js)을 못 불러왔을 때의 상자 사람 수
   PEOPLE_MODELS: 60,         // 행인 모델을 쓸 때의 사람 수 (한 명이 삼각형 약 7천 개라 상자 사람보다 적게 둔다)
-  CARS: 35,
+  CARS: 18,
   PED_SPEED: 1.3,            // m/s
   CAR_SPEED: 10,             // 큰길 m/s (약 36km/h)
   CAR_SPEED_ALLEY: 4,        // 골목 m/s
@@ -50,9 +50,9 @@ const CONFIG = {
 // pixelRatio: 화면 해상도 배율 상한, shadowMap: 그림자 지도 크기(0이면 그림자 없음), people·cars: 행인·차량 수.
 // 거리 소품 수는 js/streetprops.js가 QUALITY에 맞춰 줄이거나 늘린다(낮음 0.4배, 높음 1.3배).
 const QUALITY_PRESETS = {
-  low:    { label: "낮음", pixelRatio: 1,    shadowMap: 0,    people: 25, cars: 20 },
-  medium: { label: "보통", pixelRatio: 1.75, shadowMap: 2048, people: 60, cars: 35 },
-  high:   { label: "높음", pixelRatio: 2,    shadowMap: 4096, people: 80, cars: 45 },
+  low:    { label: "낮음", pixelRatio: 1,    shadowMap: 0,    people: 25, cars: 10 },
+  medium: { label: "보통", pixelRatio: 1.75, shadowMap: 2048, people: 60, cars: 18 },
+  high:   { label: "높음", pixelRatio: 2,    shadowMap: 4096, people: 80, cars: 25 },
 };
 function setQuality(q) {
   const p = QUALITY_PRESETS[q] || QUALITY_PRESETS.medium;

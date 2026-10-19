@@ -212,7 +212,7 @@ const TRAFFIC = (() => {
     const armGeo = new THREE.BoxGeometry(0.1, 0.58, 0.12); armGeo.translate(0, -0.29, 0);
     // instanceColor는 만들 때의 count 크기로 생기므로, count를 0으로 줄이기 전에 전체 크기로 미리 만든다
     const withColors = (im, n) => { im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3); return im; };
-    const mk = (geo) => { const m = withColors(new THREE.InstancedMesh(geo, mat(), NPED), NPED); m.count = 0; m.castShadow = true; m.frustumCulled = false; group.add(m); return m; };
+    const mk = (geo) => { const m = withColors(new THREE.InstancedMesh(geo, mat(), NPED), NPED); m.count = 0; m.castShadow = false; m.frustumCulled = false; group.add(m); return m; };
     const P = { torso: mk(torsoGeo), head: mk(headGeo), hair: mk(hairGeo), legL: mk(legGeo), legR: mk(legGeo), armL: mk(armGeo), armR: mk(armGeo) };
 
     // 행인 모델(js/people.js)을 불러왔으면 상자 사람 대신 쓴다. 자리(slot)마다 사람과 옷이 정해져 있고,
@@ -261,6 +261,34 @@ const TRAFFIC = (() => {
     const PED_MAX = crowd ? crowd.size : NPED;
 
     const NCAR = CONFIG.CARS;
+
+    // 발밑 그림자: 사람과 차는 그림자 지도에 넣지 않고(매 프레임 다시 그려야 해서 무겁다), 바닥에 옅은 타원을 깐다
+    const blobs = (() => {
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = 64;
+      const g = cv.getContext("2d"), gr = g.createRadialGradient(32, 32, 4, 32, 32, 32);
+      gr.addColorStop(0, "rgba(0,0,0,0.55)"); gr.addColorStop(0.6, "rgba(0,0,0,0.3)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+      const geo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+      const m = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      const im = new THREE.InstancedMesh(geo, m, PED_MAX + NCAR + 8);
+      im.count = 0; im.frustumCulled = false; im.renderOrder = 1;
+      group.add(im);
+      return im;
+    })();
+    function drawBlobs() {
+      const M = tmp.m, q = tmp.q, v = tmp.v, s = tmp.s;
+      let n = 0;
+      const put = (x, y, z, yaw, w, l) => {
+        if (n >= blobs.instanceMatrix.count) return;
+        q.setFromAxisAngle(tmp.up, yaw); v.set(x, y + 0.1, z); s.set(w, 1, l); // 차도(0.04m)·보도와 연석(약 0.07m)보다 위
+        blobs.setMatrixAt(n++, M.compose(v, q, s));
+      };
+      for (const p of peds) put(p.x, 0, p.z, p.yaw, 0.9, 0.9);
+      for (const c of cars) put(c.x, c.y || 0, c.z, c.yaw, c.halfW * 2.6, c.halfL * 2.3);
+      blobs.count = n;
+      blobs.instanceMatrix.needsUpdate = true;
+    }
     const CAR_COLORS = ["#f2f2f0", "#f2f2f0", "#f2f2f0", "#1a1b1d", "#1a1b1d", "#8e9297", "#b8bcc0", "#b8bcc0", "#283a5c", "#7a1f24"].map(lin);
     const BRAKE = new THREE.Color(1.0, 0.04, 0.03);
     const LAMP = new THREE.Vector3(0.7, 0.7, 1); // 모델 차의 브레이크등은 상자 차 등보다 작게 (둥근 뒷면 옆으로 비어져 나오지 않게)
@@ -280,7 +308,7 @@ const TRAFFIC = (() => {
     const busGeo = new THREE.BoxGeometry(2.5, 2.9, 11); busGeo.translate(0, 1.75, 0);
     const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 12); wheelGeo.rotateZ(Math.PI / 2); wheelGeo.translate(0, 0.34, 0);
     const lightGeo = new THREE.BoxGeometry(0.34, 0.13, 0.05);
-    const imk = (geo, m, count) => { const im = withColors(new THREE.InstancedMesh(geo, m, count), count); im.count = 0; im.castShadow = true; im.frustumCulled = false; group.add(im); return im; };
+    const imk = (geo, m, count) => { const im = withColors(new THREE.InstancedMesh(geo, m, count), count); im.count = 0; im.castShadow = false; im.frustumCulled = false; group.add(im); return im; };
     const C = {
       body: imk(bodyGeo, mat({ roughness: 0.35, metalness: 0.3 }), NCAR),
       cabin: imk(cabinGeo, mat({ color: lin("#24303a"), roughness: 0.2, metalness: 0.4 }), NCAR),
@@ -298,7 +326,7 @@ const TRAFFIC = (() => {
       if (!lib) return null;
       const types = lib.types.map((t) => ({ ...t, meshes: t.parts.map((p) => {
         const im = withColors(new THREE.InstancedMesh(p.geometry, p.material, NCAR), NCAR);
-        im.count = 0; im.castShadow = true; im.frustumCulled = false; group.add(im);
+        im.count = 0; im.castShadow = false; im.frustumCulled = false; group.add(im);
         return { im, paint: p.paint, matrix: p.matrix, pivot: p.pivot, unpivot: p.unpivot };
       }) }));
       const byId = Object.fromEntries(types.map((t) => [t.id, t]));
@@ -716,6 +744,7 @@ const TRAFFIC = (() => {
         }
       }
       draw(dt);
+      drawBlobs();
     }
 
     // 플레이어가 행인이나 차에 닿는지

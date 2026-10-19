@@ -154,7 +154,7 @@ function runRound(spec, onComplete) {
       view(x, z, h, y, p) { camera.position.set(x, h, z); yaw = y; pitch = p; },
       pos() { return { x: camera.position.x.toFixed(1), z: camera.position.z.toFixed(1), yaw: yaw.toFixed(2) }; },
       // 마지막 프레임의 그리기 호출 수와 삼각형 수 (fps가 60에서 막힐 때 무게를 비교하려고)
-      perf() { return { fps: fpsText, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }; },
+      perf() { return { fps: fpsText, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, pixelRatio: renderer.getPixelRatio() }; },
     };
   }
 
@@ -170,6 +170,17 @@ function runRound(spec, onComplete) {
   let raf = null, lastT = performance.now();
   let frozen = false; // 테스트 모드에서 행인·차량을 멈춰 두고 찍을 때
   let fpsFrames = 0, fpsTime = 0, fpsText = "";
+  // 해상도 자동 조절: 1초마다 fps를 재서 2번 연속 40 아래면 화면 배율을 0.25 낮추고, 4번 연속 55 위면 다시 올린다(품질 상한까지).
+  // 모니터 배율(125~200%)이 높은 PC에서 보통 품질이 16~21fps로 떨어졌다 (2026-10-19 측정).
+  // 1 아래로는 낮추지 않는다(0.75는 화면이 흐려진다). 그래도 느리면 품질 낮음을 고른다
+  const prMax = renderer.getPixelRatio(), prMin = Math.min(prMax, 1);
+  let pixelRatio = prMax, lowRun = 0, highRun = 0, warmup = 3;
+  function adaptResolution(fps) {
+    if (warmup > 0) { warmup--; return; } // 시작 직후(불러오기·그림자 첫 계산)는 건너뛴다
+    if (fps < 40) { highRun = 0; if (++lowRun >= 2 && pixelRatio > prMin) { pixelRatio = Math.max(prMin, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); lowRun = 0; } }
+    else if (fps > 55) { lowRun = 0; if (++highRun >= 4 && pixelRatio < prMax) { pixelRatio = Math.min(prMax, pixelRatio + 0.25); renderer.setPixelRatio(pixelRatio); highRun = 0; } }
+    else lowRun = highRun = 0;
+  }
 
   function cleanup() {
     window.removeEventListener("keydown", onKeyDown);
@@ -211,7 +222,7 @@ function runRound(spec, onComplete) {
     const dt = Math.min((now - lastT) / 1000, 0.1);
     lastT = now;
     fpsFrames++; fpsTime += dt;
-    if (fpsTime >= 1) { fpsText = `${Math.round(fpsFrames / fpsTime)} fps`; fpsFrames = 0; fpsTime = 0; }
+    if (fpsTime >= 1) { const f = fpsFrames / fpsTime; fpsText = `${Math.round(f)} fps`; if (!paused) adaptResolution(f); fpsFrames = 0; fpsTime = 0; }
     camera.rotation.order = "YXZ";
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
@@ -257,7 +268,7 @@ function runRound(spec, onComplete) {
           : ["(소리 없음)"];
         const dg = Math.hypot(camera.position.x - goal.x, camera.position.z - goal.z);
         const ri = renderer.info.render;
-        hudEl.textContent = [...lines, `목적지까지 직선 ${dg.toFixed(0)}m`, `${fpsText} · 그리기 ${ri.calls}회 · 삼각형 ${Math.round(ri.triangles / 1000)}k`, "P: 즉시 도착"].join("\n");
+        hudEl.textContent = [...lines, `목적지까지 직선 ${dg.toFixed(0)}m`, `${fpsText} · 해상도 ×${renderer.getPixelRatio()} · 그리기 ${ri.calls}회 · 삼각형 ${Math.round(ri.triangles / 1000)}k`, "P: 즉시 도착"].join("\n");
       }
 
       if (Math.hypot(camera.position.x - goal.x, camera.position.z - goal.z) < CONFIG.GOAL_RADIUS) {

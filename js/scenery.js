@@ -1198,6 +1198,10 @@ const SCENERY = (() => {
     const shadowSize = QUALITY_PRESETS[CONFIG.QUALITY].shadowMap; // 품질 낮음은 그림자 없음
     renderer.shadowMap.enabled = shadowSize > 0;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // 그림자를 드리우는 것은 건물·나무·전봇대처럼 움직이지 않는 것뿐이라, 그림자 지도는 해가 따라 움직일 때만 다시 그린다.
+    // 매 프레임 다시 그리면 장면 전체(삼각형 약 270만 개)를 한 번 더 그려서 fps가 절반 가까이 떨어졌다 (2026-10-19 측정: 26 → 41)
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
 
     const HORIZON = 0xdfe7ec;
     scene.fog = new THREE.Fog(lin(HORIZON), CONFIG.FOG_NEAR, CONFIG.FOG_FAR);
@@ -1224,14 +1228,22 @@ const SCENERY = (() => {
     sun.shadow.bias = -0.0003;
     sun.shadow.normalBias = 0.4;
     const sc = sun.shadow.camera;
-    sc.near = 1; sc.far = 600; sc.left = -75; sc.right = 75; sc.top = 75; sc.bottom = -75;
+    sc.near = 1; sc.far = 600; sc.left = -80; sc.right = 80; sc.top = 80; sc.bottom = -80;
     scene.add(sun, sun.target);
 
-    // 그림자는 플레이어 주변만 촘촘하게 그린다
+    // 그림자는 플레이어 주변만 촘촘하게 그린다. 플레이어가 8m 넘게 움직여 해가 따라 옮겨질 때만 그림자 지도를 다시 그린다
+    const STEP = 8;
+    let sx = NaN, sz = NaN;
     return function update() {
       sky.position.copy(camera.position);
-      sun.target.position.set(Math.round(camera.position.x / 4) * 4, 0, Math.round(camera.position.z / 4) * 4);
-      sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 300);
+      const tx = Math.round(camera.position.x / STEP) * STEP, tz = Math.round(camera.position.z / STEP) * STEP;
+      if (tx !== sx || tz !== sz) {
+        sx = tx; sz = tz;
+        sun.target.position.set(tx, 0, tz);
+        sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 300);
+        sun.target.updateMatrixWorld();
+        renderer.shadowMap.needsUpdate = true;
+      }
     };
   }
 
