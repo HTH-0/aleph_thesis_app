@@ -913,7 +913,8 @@ out geom;`;
     id: region.id, name: region.name, desc: region.desc,
     center: region.center, size, cell: CELL, n: N,
     attribution: "© OpenStreetMap contributors (ODbL)",
-    builtAt: new Date().toISOString().slice(0, 10),
+    // 만든 날 대신 입력 OSM 원본의 날짜를 적는다 (같은 입력이면 어느 PC에서 다시 만들어도 파일이 똑같게)
+    builtAt: (data.osm3s?.timestamp_osm_base || new Date().toISOString()).slice(0, 10),
     grid: rows, landmarks: merged,
     scenery: { buildings, roads, green, trees, crossings, crosswalks, junctionsOpen: usedJunctions, crosswalkSource: hasPublic ? "public" : "rule" },
     sources: {
