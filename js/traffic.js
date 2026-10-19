@@ -94,9 +94,19 @@ const TRAFFIC = (() => {
     }
 
     // ---------- 차로 ----------
-    const lanes = [];
-    for (const rd of roads) {
-      if (rd.k !== "car" || rd.w < 5) continue;
+    // 도로를 교차로(두 차도가 함께 쓰는 지점)에서 나눠 도로망을 만든다. 차는 같은 교차로에서 시작하는 차로로만 넘어가고,
+    // 차로 끝은 교차로 안쪽에서 잘라 그 사이를 곡선으로 돈다 (모퉁이 보도나 옆 골목으로 건너뛰지 않게)
+    const keyOf = (p) => p[0].toFixed(1) + "," + p[1].toFixed(1);
+    const carRoads = roads.filter((rd) => rd.k === "car" && rd.w >= 5);
+    const nodes = new Map(); // 지점 → { n: 지나는 도로 수, hw: 가장 넓은 도로의 반폭 }
+    for (const rd of carRoads) for (const p of rd.pts) {
+      const e = nodes.get(keyOf(p)) || nodes.set(keyOf(p), { n: 0, hw: 0 }).get(keyOf(p));
+      e.n++; e.hw = Math.max(e.hw, rd.w / 2);
+    }
+    const isJunction = (p) => (nodes.get(keyOf(p)) || { n: 0 }).n >= 2;
+    const lanes = [], lanesFrom = new Map();
+    let segId = 0;
+    for (const rd of carRoads) {
       const hw = rd.w / 2, wide = rd.w >= WIDE;
       const offs = [];
       if (wide) {
@@ -104,11 +114,27 @@ const TRAFFIC = (() => {
         const perDir = Math.max(1, Math.floor(total / 2)), laneW = (hw - 0.5) / perDir;
         for (let j = 0; j < perDir; j++) offs.push(0.4 + (j + 0.5) * laneW);
       } else offs.push(rd.w / 4);
-      const fwd = rd.pts, back = rd.pts.slice().reverse();
-      for (const [pts, sign] of [[fwd, 1], [back, -1]]) for (const o of offs) {
-        const S = offsetSamples(pts, o, 3);
-        if (S.length < 2) continue;
-        const lane = { pts: S, len: S[S.length - 1].d, wide, rd, stops: [] };
+      const cuts = [0];
+      for (let i = 1; i < rd.pts.length - 1; i++) if (isJunction(rd.pts[i])) cuts.push(i);
+      cuts.push(rd.pts.length - 1);
+      for (let c = 0; c + 1 < cuts.length; c++) {
+        const seg = rd.pts.slice(cuts[c], cuts[c + 1] + 1), sid = segId++;
+        if (seg.length < 2) continue;
+        for (const [pts, from, to] of [[seg, seg[0], seg[seg.length - 1]], [seg.slice().reverse(), seg[seg.length - 1], seg[0]]]) for (const o of offs) {
+          let S = offsetSamples(pts, o, 3);
+          if (S.length < 2) continue;
+          // 교차로 쪽 끝을 교차 도로 반폭 + 1.5m만큼 잘라 낸다 (남는 길이가 2m는 되게)
+          const L = S[S.length - 1].d;
+          let t0 = isJunction(from) ? nodes.get(keyOf(from)).hw + 1.5 : 0, t1 = isJunction(to) ? nodes.get(keyOf(to)).hw + 1.5 : 0;
+          if (t0 + t1 > L - 2) { const k = Math.max(0, L - 2) / (t0 + t1 || 1); t0 *= k; t1 *= k; }
+          if (t0 > 0 || t1 > 0) {
+            const a = along({ pts: S }, t0), b = along({ pts: S }, L - t1);
+            const mid = S.filter((p) => p.d > t0 && p.d < L - t1).map((p) => ({ x: p.x, z: p.z }));
+            S = [{ x: a.x, z: a.z }, ...mid, { x: b.x, z: b.z }];
+            for (let i = 0; i < S.length; i++) S[i].d = i === 0 ? 0 : S[i - 1].d + Math.hypot(S[i].x - S[i - 1].x, S[i].z - S[i - 1].z);
+          }
+          if (S.length < 2 || S[S.length - 1].d < 0.5) continue;
+        const lane = { pts: S, len: S[S.length - 1].d, wide, rd, stops: [], seg: sid, from: keyOf(from), to: keyOf(to), dead: !isJunction(to) };
         // 신호가 있는 횡단보도: 교차로로 들어가는 쪽만 멈춘다 (단독 횡단보도는 양쪽 다)
         for (const c of scenery.crossings) {
           if (c.rd !== rd) continue;
@@ -122,11 +148,12 @@ const TRAFFIC = (() => {
         }
         lane.stops.sort((a, b) => a.s - b.s);
         lanes.push(lane);
+        (lanesFrom.get(lane.from) || lanesFrom.set(lane.from, []).get(lane.from)).push(lane);
+        }
       }
     }
-    const laneStarts = makeIndex(16), lanePoints = makeIndex(20);
+    const lanePoints = makeIndex(20);
     lanes.forEach((ln, li) => {
-      laneStarts.add(ln.pts[0].x, ln.pts[0].z, { x: ln.pts[0].x, z: ln.pts[0].z, li });
       ln.pts.forEach((p, i) => { if (i % 3 === 0) lanePoints.add(p.x, p.z, { x: p.x, z: p.z, li, s: p.d }); });
     });
 
@@ -337,6 +364,7 @@ const TRAFFIC = (() => {
       for (const p of peds) if (p.state !== "wait" && Math.abs(p.x - car.x) < 20 && Math.abs(p.z - car.z) < 20) check(p.x, p.z, 0.3);
       return limit;
     }
+    // 지금 차로가 끝나는 교차로에서 시작하는 차로 가운데 하나를 고른다 (같은 길로 되돌아가는 유턴은 하지 않는다)
     function nextLane(car) {
       const ln = car.lane, end = ln.pts[ln.pts.length - 1], pre = ln.pts[Math.max(0, ln.pts.length - 3)];
       const hx = end.x - pre.x, hz = end.z - pre.z, hl = Math.hypot(hx, hz) || 1;
@@ -346,30 +374,54 @@ const TRAFFIC = (() => {
         const dl = Math.hypot(b.x - a.x, b.z - a.z) || 1;
         return ((b.x - a.x) * hx + (b.z - a.z) * hz) / (dl * hl);
       };
-      const opts = laneStarts.near(end.x, end.z, 16).map((e) => lanes[e.li])
-        .filter((l) => l !== ln && l.rd !== ln.rd && turn(l) > -0.2); // 유턴은 하지 않는다
+      if (ln.dead) return null;
+      const all = (lanesFrom.get(ln.to) || []).filter((l) => l.seg !== ln.seg && turn(l) > -0.5);
+      // 같은 방향 차로가 여럿이면(큰길의 1·2차로) 지금과 가장 가까운 차로로 이어 간다
+      const byRoad = new Map();
+      for (const l of all) {
+        const d = Math.hypot(l.pts[0].x - end.x, l.pts[0].z - end.z), k = l.seg;
+        if (!byRoad.has(k) || d < byRoad.get(k).d) byRoad.set(k, { l, d });
+      }
+      const opts = [...byRoad.values()].map((o) => o.l);
       if (!opts.length) return null;
       // 곧게 이어지는 길을 더 자주 고른다
       const straight = opts.filter((l) => turn(l) > 0.8);
       return straight.length && Math.random() < 0.6 ? pick(straight) : pick(opts);
     }
+    // 교차로 안에서 앞 차로 끝 → 다음 차로 시작을 잇는 곡선 (3차 베지어, 양 끝에서 차로 방향을 따른다)
+    function turnPath(a, ha, b, hb) {
+      const dist = Math.hypot(b.x - a.x, b.z - a.z), k = dist * 0.45;
+      const p1 = { x: a.x + ha.x * k, z: a.z + ha.z * k }, p2 = { x: b.x - hb.x * k, z: b.z - hb.z * k };
+      const pts = [];
+      for (let i = 0; i <= 10; i++) {
+        const t = i / 10, u = 1 - t;
+        pts.push({ x: u * u * u * a.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * b.x, z: u * u * u * a.z + 3 * u * u * t * p1.z + 3 * u * t * t * p2.z + t * t * t * b.z });
+      }
+      for (let i = 0; i < pts.length; i++) pts[i].d = i === 0 ? 0 : pts[i - 1].d + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+      return { pts, len: pts[pts.length - 1].d };
+    }
+    const dirAt = (ln, atEnd) => {
+      const p = ln.pts, a = atEnd ? p[Math.max(0, p.length - 2)] : p[0], b = atEnd ? p[p.length - 1] : p[Math.min(p.length - 1, 1)];
+      const l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      return { x: (b.x - a.x) / l, z: (b.z - a.z) / l };
+    };
     function updateCars(dt, t, player) {
       for (let i = cars.length - 1; i >= 0; i--) {
         const car = cars[i];
         if (Math.hypot(car.x - player.x, car.z - player.z) > R + 30) { cars.splice(i, 1); continue; }
-        const target = car.trans ? Math.min(car.lane.wide ? CONFIG.CAR_SPEED : CONFIG.CAR_SPEED_ALLEY, 6) : carTarget(car, t, player);
+        // 교차로를 도는 동안에는 천천히(6m/s 이하) 가되, 앞의 플레이어·행인·차는 똑같이 본다
+        const target = car.trans ? Math.min(6, carTarget(car, t, player)) : carTarget(car, t, player);
         car.braking = target < car.v - 0.2;
         car.v += Math.max(-7 * dt, Math.min(2.5 * dt, target - car.v));
         if (car.v < 0) car.v = 0;
         if (car.trans) {
-          // 교차로에서 다음 차로 시작점까지 곧게 이어 간다
+          // 교차로 안에서 곡선을 따라 다음 차로로 간다
           const tr = car.trans;
-          tr.t += (car.v * dt) / tr.len;
-          if (tr.t >= 1) { car.trans = null; car.s = 0; }
+          tr.s += car.v * dt;
+          if (tr.s >= tr.len) { car.trans = null; car.s = 0; }
           else {
-            car.x = tr.a.x + (tr.b.x - tr.a.x) * tr.t; car.z = tr.a.z + (tr.b.z - tr.a.z) * tr.t;
-            const ty = Math.atan2(tr.b.x - tr.a.x, tr.b.z - tr.a.z);
-            car.yaw = ty;
+            const p = along(tr, tr.s);
+            car.x = p.x; car.z = p.z; car.yaw = Math.atan2(p.dx, p.dz);
             continue;
           }
         }
@@ -378,9 +430,9 @@ const TRAFFIC = (() => {
           const nl = nextLane(car);
           if (!nl) { cars.splice(i, 1); continue; }
           const a = car.lane.pts[car.lane.pts.length - 1], b = nl.pts[0];
-          car.lane = nl;
-          const len = Math.hypot(b.x - a.x, b.z - a.z);
-          if (len > 0.5) { car.trans = { a, b, len, t: 0 }; continue; }
+          const tp = turnPath(a, dirAt(car.lane, true), b, dirAt(nl, false));
+          car.lane = nl; car.s = 0;
+          if (tp.len > 0.5) { car.trans = { pts: tp.pts, len: tp.len, s: 0 }; continue; }
           car.s = 0;
         }
         const p = along(car.lane, car.s);
@@ -459,8 +511,20 @@ const TRAFFIC = (() => {
       return false;
     }
 
+    // 검사용: 차가 차도 노면(중심선에서 반폭 안)이나 교차로 안에 있는지. 1m 넘게 벗어난 차 수를 센다
+    const offRoad = (x, z) => {
+      let best = Infinity;
+      for (const rd of carRoads) for (let i = 0; i + 1 < rd.pts.length; i++) {
+        const a = rd.pts[i], b = rd.pts[i + 1];
+        if (Math.min(a[0], b[0]) - 30 > x || Math.max(a[0], b[0]) + 30 < x || Math.min(a[1], b[1]) - 30 > z || Math.max(a[1], b[1]) + 30 < z) continue;
+        const dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz, t = L ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)) : 0;
+        best = Math.min(best, Math.hypot(a[0] + dx * t - x, a[1] + dz * t - z) - rd.w / 2);
+      }
+      return best;
+    };
     return { update, hits, stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, lanes: lanes.length, crossings: scenery.crossings.length,
-        waiting: peds.filter((p) => p.state === "wait").length, crossing: peds.filter((p) => p.state === "cross").length, carsStopped: cars.filter((c) => c.v < 0.3).length }), };
+        waiting: peds.filter((p) => p.state === "wait").length, crossing: peds.filter((p) => p.state === "cross").length, carsStopped: cars.filter((c) => c.v < 0.3).length,
+        carsOffRoad: cars.filter((c) => offRoad(c.x, c.z) > 1).length, carsTurning: cars.filter((c) => c.trans).length }), };
   }
 
   return { create };
