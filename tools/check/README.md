@@ -13,6 +13,7 @@ Chrome을 못 찾으면 `CHROME_PATH` 환경 변수로 위치를 알려 준다.
 | `node tools/check/islands.mjs` | 차도·보도 자리인데 걷는 영역에서 떨어져 나간 길(막힌 땅·화단이 된 곳)의 비율과 위치를 지역마다 보여 준다. 지도 끝 20m 안 덩어리는 "가장자리"로 따로 센다 |
 | `node tools/check/crosswalk_xcheck.mjs` | 공공 횡단보도와 규칙 교차로의 일치 비율 표를 다시 만든다 (먼저 `node tools/fetch_public.mjs`) |
 | `node tools/check/shp_info.mjs <파일.shp>` | 새 공공데이터 Shapefile의 열 이름과 첫 값, 위경도 변환 결과를 보여 준다 |
+| `node tools/check/buildings.mjs` | 지역마다 건물 유형별 개수와 비율, 유형별 대표 건물 수를 보여 준다 (건물 모습 판정용) |
 | `node tools/check/sidewalk.mjs` | 차도마다 "양옆에 인도가 있다"는 가정을 데이터(큰길, 서울 보도 통계, 공공 횡단보도, 건물 간격)로 나누고, 게임 경로가 자주 지나는 확인 지점을 지역당 10곳 고른다 → `out/sidewalk_points.json` |
 
 ## 지도 검수 화면 (사람이 판정)
@@ -22,6 +23,7 @@ Chrome을 못 찾으면 `CHROME_PATH` 환경 변수로 위치를 알려 준다.
 - 카카오 JavaScript 키를 저장소 맨 위 `.env`에 `KAKAO_JS_KEY=...`로 넣는다(커밋하지 않는다). 카카오 개발자 콘솔에서 `http://127.0.0.1:8765`, `http://localhost:8765`를 JavaScript SDK 도메인으로 등록하고 카카오맵 사용 설정을 켠다.
 - 판정은 `out/review_checks.json`에 쌓인다. 카카오 화면(로드뷰 이미지)은 저장하지 않는다. 카카오는 공식 API로 실시간 표시만 허용하고 이미지 추출·저장과 자동 분석은 막는다.
 - 같은 포트에서 게임(`/`)도 열린다. `serve.mjs`와 함께 켜지 않는다.
+- **건물 모습** 판정은 `http://127.0.0.1:8765/review?mode=bldg` (위쪽 "검수 항목"으로 바꿀 수 있다). `buildings.mjs`가 공공 건물을 구조·사용승인 연도·층수·아파트 단지 여부로 10개 유형으로 나누고, 유형마다 차도에서 보이는 대표 건물 3곳을 고른다. 로드뷰로 보고 벽 재료(1~6), 발코니(Q~R), 1층(A~F), 지붕(Z~C)을 고른다. 판정은 `tools/check/building_checks.json`에 쌓이고, 다른 PC에서도 이어서 쓰도록 저장소에 올린다.
 
 ## 브라우저로 (먼저 다른 터미널에서 `node tools/check/serve.mjs`)
 

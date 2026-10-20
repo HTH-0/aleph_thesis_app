@@ -45,12 +45,15 @@
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   #status { font-size: 12px; min-height: 1.2em; }
   .hint { font-size: 12px; color: var(--color-neutral-700); line-height: 1.5; }
+  .opts.three { grid-template-columns: 1fr 1fr 1fr; }
+  #types { font-size: 12px; color: var(--color-neutral-700); line-height: 1.6; margin: 0; padding-left: 18px; }
 </style>
 </head>
 <body>
 <header>
   <h1>지도 검수</h1>
   <label>지역 <select id="region"></select></label>
+  <label>검수 항목 <select id="mode"><option value="walk">인도·도로 폭</option><option value="bldg">건물 모습</option></select></label>
   <span class="progress" id="progress"></span>
   <div class="legend">
     <span><i class="sw" style="background:var(--yes)"></i>인도 증거 있음</span>
@@ -64,12 +67,51 @@
     <div>
       <h2>확인 지점</h2>
       <ol id="points"></ol>
-      <p class="hint">우리 지도에서 아무 곳이나 클릭해도 그 자리를 볼 수 있습니다(직접 고른 지점).</p>
+      <p class="hint walk-only">우리 지도에서 아무 곳이나 클릭해도 그 자리를 볼 수 있습니다(직접 고른 지점).</p>
+      <p class="hint bldg-only">유형마다 대표 건물 3곳입니다. 로드뷰를 돌려 하늘색 테두리 건물을 보고 고릅니다. 이 건물이 동네의 같은 유형 건물과 많이 다르면 메모로 알려 주세요.</p>
+      <ul id="types" class="bldg-only"></ul>
     </div>
     <form id="form">
       <h2>판정</h2>
       <p id="spot"></p>
-      <fieldset>
+      <fieldset class="bldg-only">
+        <legend>벽 재료와 색</legend>
+        <div class="opts">
+          <label><input type="radio" name="wall" value="redbrick" id="b-redbrick" /> 붉은·갈색 벽돌 <kbd>1</kbd></label>
+          <label><input type="radio" name="wall" value="tile" id="b-tile" /> 밝은 타일(흰·베이지) <kbd>2</kbd></label>
+          <label><input type="radio" name="wall" value="paint" id="b-paint" /> 페인트·미장 <kbd>3</kbd></label>
+          <label><input type="radio" name="wall" value="glass" id="b-glass" /> 유리·금속판 <kbd>4</kbd></label>
+          <label><input type="radio" name="wall" value="hanok" id="b-hanok" /> 기와·슬레이트 단층 <kbd>5</kbd></label>
+          <label><input type="radio" name="wall" value="unknown" id="b-wunknown" /> 모르겠음 <kbd>6</kbd></label>
+        </div>
+      </fieldset>
+      <fieldset class="bldg-only">
+        <legend>발코니</legend>
+        <div class="opts">
+          <label><input type="radio" name="balcony" value="enclosed" id="b-enclosed" /> 유리로 막은 확장형 <kbd>Q</kbd></label>
+          <label><input type="radio" name="balcony" value="railing" id="b-railing" /> 난간 있는 발코니 <kbd>W</kbd></label>
+          <label><input type="radio" name="balcony" value="none" id="b-nobal" /> 없음 <kbd>E</kbd></label>
+          <label><input type="radio" name="balcony" value="unknown" id="b-bunknown" /> 모르겠음 <kbd>R</kbd></label>
+        </div>
+      </fieldset>
+      <fieldset class="bldg-only">
+        <legend>1층</legend>
+        <div class="opts">
+          <label><input type="radio" name="ground" value="shop" id="b-shop" /> 가게(간판·유리) <kbd>A</kbd></label>
+          <label><input type="radio" name="ground" value="piloti" id="b-piloti" /> 필로티 주차장 <kbd>S</kbd></label>
+          <label><input type="radio" name="ground" value="house" id="b-house" /> 주거·현관 <kbd>D</kbd></label>
+          <label><input type="radio" name="ground" value="unknown" id="b-gunknown" /> 모르겠음 <kbd>F</kbd></label>
+        </div>
+      </fieldset>
+      <fieldset class="bldg-only">
+        <legend>지붕</legend>
+        <div class="opts three">
+          <label><input type="radio" name="roof" value="flat" id="b-flat" /> 평지붕 <kbd>Z</kbd></label>
+          <label><input type="radio" name="roof" value="pitched" id="b-pitched" /> 경사 지붕 <kbd>X</kbd></label>
+          <label><input type="radio" name="roof" value="unknown" id="b-runknown" /> 모르겠음 <kbd>C</kbd></label>
+        </div>
+      </fieldset>
+      <fieldset class="walk-only">
         <legend>실제 인도</legend>
         <div class="opts">
           <label><input type="radio" name="sidewalk" value="both" id="sw-both" /> 양쪽 있음 <kbd>1</kbd></label>
@@ -78,7 +120,7 @@
           <label><input type="radio" name="sidewalk" value="unknown" id="sw-unknown" /> 모르겠음 <kbd>4</kbd></label>
         </div>
       </fieldset>
-      <fieldset>
+      <fieldset class="walk-only">
         <legend>도로 폭 (노란 선과 실제 연석 비교)</legend>
         <div class="opts">
           <label><input type="radio" name="width" value="same" id="w-same" /> 비슷함 <kbd>Q</kbd></label>
@@ -87,7 +129,8 @@
           <label><input type="radio" name="width" value="unknown" id="w-unknown" /> 모르겠음 <kbd>R</kbd></label>
         </div>
       </fieldset>
-      <label for="note">메모 (예: 차도 위치가 5m 남쪽으로 밀림, 주차장 통로임)</label>
+      <label for="note" class="walk-only">메모 (예: 차도 위치가 5m 남쪽으로 밀림, 주차장 통로임)</label>
+      <label for="note" class="bldg-only">메모 (예: 이 유형은 대부분 2층 상가주택, 외벽은 회색 미장)</label>
       <textarea id="note"></textarea>
       <div class="row">
         <button class="btn btn-primary" type="submit">저장하고 다음 (Enter)</button>
@@ -124,6 +167,11 @@ const KIND = { narrow: "좁은 골목", mid: "8~10m 길", cw: "횡단보도만 �
 const SW = { both: "양쪽 있음", one: "한쪽만", none: "없음", unknown: "모르겠음" };
 const WD = { same: "폭 비슷", wider: "실제가 넓음", narrower: "실제가 좁음", unknown: "폭 모름" };
 
+const MODE = new URLSearchParams(location.search).get("mode") === "bldg" ? "bldg" : "walk";
+for (const el of document.querySelectorAll(MODE === "bldg" ? ".walk-only" : ".bldg-only")) el.hidden = true;
+const WALL = { redbrick: "붉은 벽돌", tile: "밝은 타일", paint: "페인트", glass: "유리·금속", hanok: "기와·슬레이트", unknown: "벽 모름" };
+const API = MODE === "bldg" ? "/api/bchecks" : "/api/checks";
+let kpoly = null;
 const S = { region: null, d: null, rep: null, cls: new Map(), checks: [], cur: null, view: { s: 1, ox: 0, oy: 0 }, img: null, rvPan: null, rvPos: null, wantPan: null };
 let kmap = null, krv = null, krvc = null, kmarker = null, edgeLines = [], kakaoReady = false;
 
@@ -144,18 +192,24 @@ async function init() {
   const want = new URLSearchParams(location.search).get("region");
   $("region").value = regions.some((r) => r.id === want) ? want : "banwoldang";
   $("region").addEventListener("change", () => loadRegion($("region").value));
-  S.checks = await (await fetch("/api/checks")).json();
+  $("mode").value = MODE;
+  $("mode").addEventListener("change", () => { location.search = `?region=${S.region}${$("mode").value === "bldg" ? "&mode=bldg" : ""}`; });
+  S.checks = await (await fetch(API)).json();
   initKakao();
   await loadRegion($("region").value);
 }
 
 async function loadRegion(id) {
   S.region = id;
-  history.replaceState(null, "", `?region=${id}`);
+  history.replaceState(null, "", `?region=${id}${MODE === "bldg" ? "&mode=bldg" : ""}`);
   $("points").textContent = "불러오는 중…";
-  const [d, rep] = await Promise.all([fetch(`/data/${id}.json`).then((r) => r.json()), fetch(`/api/report?region=${id}`).then((r) => r.json())]);
+  const [d, rep] = await Promise.all([fetch(`/data/${id}.json`).then((r) => r.json()), fetch(`/api/${MODE === "bldg" ? "buildings" : "report"}?region=${id}`).then((r) => r.json())]);
   S.d = d; S.rep = rep; S.g = geo(d);
-  S.cls = new Map(rep.roads.map((r) => [r.i, r]));
+  S.cls = new Map((rep.roads || []).map((r) => [r.i, r]));
+  if (MODE === "bldg") {
+    $("types").textContent = "";
+    for (const t of rep.types) { const li = document.createElement("li"); li.textContent = `${t.label}: ${t.count}동 (${t.pct}%)`; $("types").append(li); }
+  }
   // 걷는 칸 격자를 한 번만 그림으로 만든다
   const n = d.n, img = new ImageData(n, n);
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
@@ -179,8 +233,8 @@ function renderList() {
     const li = document.createElement("li"), b = document.createElement("button"), c = checkOf(p);
     b.type = "button";
     b.innerHTML = `<span class="n">${k + 1}</span><span class="k"></span><span class="done"></span>`;
-    b.querySelector(".k").textContent = `${KIND[p.kind]} · 폭 ${p.w}m · 경로 ${p.use}회`;
-    b.querySelector(".done").textContent = c ? `✓ ${SW[c.sidewalk] || ""}` : "";
+    b.querySelector(".k").textContent = MODE === "bldg" ? `${p.label} · ${p.floors}층${p.y ? ` · ${p.y}년` : ""}` : `${KIND[p.kind]} · 폭 ${p.w}m · 경로 ${p.use}회`;
+    b.querySelector(".done").textContent = c ? `✓ ${MODE === "bldg" ? WALL[c.wall] || "" : SW[c.sidewalk] || ""}` : "";
     b.setAttribute("aria-current", String(S.cur && S.cur.point === p.id));
     b.addEventListener("click", () => select(p));
     li.append(b); ol.append(li);
@@ -190,7 +244,10 @@ function renderList() {
 }
 
 function select(p) {
-  S.cur = { point: p.id, x: p.x, z: p.z, tx: p.tx, tz: p.tz, label: `${p.id} · ${KIND[p.kind]}`, reason: p.reason };
+  S.cur = MODE === "bldg"
+    ? { point: p.id, x: p.x, z: p.z, tx: p.tx, tz: p.tz, type: p.type, building: p.building, label: `${p.id} · ${p.label}`, reason: `${p.floors}층${p.y ? `, ${p.y}년 사용승인` : ""}${p.nm ? `, ${p.nm}` : ""} · 앞 차도 폭 ${p.roadW}m` }
+    : { point: p.id, x: p.x, z: p.z, tx: p.tx, tz: p.tz, label: `${p.id} · ${KIND[p.kind]}`, reason: p.reason };
+  highlightBuilding();
   centerOn(p.x, p.z);
   fillForm(checkOf(p));
   showSpot();
@@ -199,6 +256,7 @@ function select(p) {
 }
 
 function selectFree(x, z) {
+  if (MODE === "bldg") return; // 건물 모습은 대표 건물만 판정한다
   // 가장 가까운 차도의 방향으로 로드뷰를 돌린다
   let best = null, bd = 30;
   for (const rd of S.d.scenery.roads) for (let i = 0; i + 1 < rd.p.length; i++) {
@@ -222,18 +280,18 @@ function showSpot() {
 function fillForm(c) {
   for (const el of document.querySelectorAll("#form input[type=radio]")) el.checked = !!c && (el.value === c[el.name]);
   $("note").value = c ? c.note : "";
-  $("status").textContent = c ? `저장된 판정: ${SW[c.sidewalk] || "-"}, ${WD[c.width] || "-"}` : "";
+  $("status").textContent = !c ? "" : MODE === "bldg" ? `저장된 판정: ${WALL[c.wall] || "-"}` : `저장된 판정: ${SW[c.sidewalk] || "-"}, ${WD[c.width] || "-"}`;
 }
 
 $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!S.cur) return;
-  const sidewalk = (document.querySelector("input[name=sidewalk]:checked") || {}).value;
-  const width = (document.querySelector("input[name=width]:checked") || {}).value;
-  if (!sidewalk && !width && !$("note").value.trim()) { $("status").textContent = "인도나 도로 폭 가운데 하나는 골라 주세요."; return; }
+  const val = (n) => (document.querySelector(`input[name=${n}]:checked`) || {}).value;
+  const sidewalk = val("sidewalk"), width = val("width"), wall = val("wall"), balcony = val("balcony"), ground = val("ground"), roof = val("roof");
+  if (MODE === "bldg" ? !wall && !$("note").value.trim() : !sidewalk && !width && !$("note").value.trim()) { $("status").textContent = MODE === "bldg" ? "벽 재료는 골라 주세요." : "인도나 도로 폭 가운데 하나는 골라 주세요."; return; }
   const [lat, lon] = S.g.toLL(S.cur.x, S.cur.z);
-  const res = await fetch("/api/checks", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ region: S.region, point: S.cur.point, x: S.cur.x, z: S.cur.z, lat: +lat.toFixed(6), lon: +lon.toFixed(6), sidewalk, width, note: $("note").value }) });
+  const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ region: S.region, point: S.cur.point, type: S.cur.type, building: S.cur.building, x: S.cur.x, z: S.cur.z, lat: +lat.toFixed(6), lon: +lon.toFixed(6), sidewalk, width, wall, balcony, ground, roof, note: $("note").value }) });
   if (!res.ok) { $("status").textContent = "저장하지 못했습니다. 검수 서버(review.mjs)가 켜져 있는지 확인해 주세요."; return; }
   const rec = await res.json();
   const k = rec.point ? S.checks.findIndex((c) => c.point === rec.point) : -1;
@@ -247,7 +305,10 @@ $("form").addEventListener("submit", async (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
-  const map = { Digit1: "sw-both", Digit2: "sw-one", Digit3: "sw-none", Digit4: "sw-unknown", KeyQ: "w-same", KeyW: "w-wider", KeyE: "w-narrower", KeyR: "w-unknown" };
+  const map = MODE === "bldg"
+    ? { Digit1: "b-redbrick", Digit2: "b-tile", Digit3: "b-paint", Digit4: "b-glass", Digit5: "b-hanok", Digit6: "b-wunknown", KeyQ: "b-enclosed", KeyW: "b-railing", KeyE: "b-nobal", KeyR: "b-bunknown",
+        KeyA: "b-shop", KeyS: "b-piloti", KeyD: "b-house", KeyF: "b-gunknown", KeyZ: "b-flat", KeyX: "b-pitched", KeyC: "b-runknown" }
+    : { Digit1: "sw-both", Digit2: "sw-one", Digit3: "sw-none", Digit4: "sw-unknown", KeyQ: "w-same", KeyW: "w-wider", KeyE: "w-narrower", KeyR: "w-unknown" };
   if (map[e.code]) { $(map[e.code]).checked = true; e.preventDefault(); }
   else if (e.code === "Enter") { $("form").requestSubmit(); e.preventDefault(); }
 });
@@ -282,6 +343,12 @@ function draw() {
     g2.beginPath(); rd.p.forEach(([x, z], k) => (k ? g2.lineTo(sx(x), sy(z)) : g2.moveTo(sx(x), sy(z)))); g2.stroke();
   });
   g2.globalAlpha = 1;
+  // 판정할 건물 테두리
+  if (S.cur && Number.isFinite(S.cur.building)) {
+    const bp = S.d.scenery.buildings[S.cur.building].p;
+    g2.strokeStyle = "#7fd3ff"; g2.lineWidth = 3; g2.fillStyle = "rgba(127,211,255,0.35)";
+    g2.beginPath(); bp.forEach(([x, z], k) => (k ? g2.lineTo(sx(x), sy(z)) : g2.moveTo(sx(x), sy(z)))); g2.closePath(); g2.fill(); g2.stroke();
+  }
   // 공공 횡단보도
   g2.fillStyle = "#ffffff";
   for (const cw of S.d.scenery.crosswalks || []) g2.fillRect(sx(cw.x) - 2, sy(cw.z) - 2, 4, 4);
@@ -356,7 +423,7 @@ function initKakao() {
     kakao.maps.event.addListener(kmap, "click", (ev) => { if (S.g) { const [x, z] = S.g.fromLL(ev.latLng.getLat(), ev.latLng.getLng()); selectFree(x, z); centerOn(x, z); } });
     kakaoReady = true;
     drawEdges();
-    if (S.cur) lookAt(S.cur.x, S.cur.z, S.cur.tx, S.cur.tz);
+    if (S.cur) { lookAt(S.cur.x, S.cur.z, S.cur.tx, S.cur.tz); highlightBuilding(); }
   });
   document.head.append(s);
   $("t-edges").addEventListener("change", () => edgeLines.forEach((l) => l.setMap($("t-edges").checked ? kmap : null)));
@@ -381,6 +448,13 @@ function drawEdges() {
       edgeLines.push(new kakao.maps.Polyline({ map: $("t-edges").checked ? kmap : null, path, strokeWeight: 2, strokeColor: "#ffd84a", strokeOpacity: 0.9 }));
     }
   }
+}
+// 판정할 건물을 스카이뷰에 하늘색 테두리로 표시한다
+function highlightBuilding() {
+  if (kpoly) { kpoly.setMap(null); kpoly = null; }
+  if (!kakaoReady || !S.cur || !Number.isFinite(S.cur.building)) return;
+  const path = S.d.scenery.buildings[S.cur.building].p.map(([x, z]) => { const [lat, lon] = S.g.toLL(x, z); return new kakao.maps.LatLng(lat, lon); });
+  kpoly = new kakao.maps.Polygon({ map: kmap, path, strokeWeight: 3, strokeColor: "#7fd3ff", strokeOpacity: 1, fillColor: "#7fd3ff", fillOpacity: 0.25 });
 }
 // 그 자리에서 가장 가까운 로드뷰를 열고, 길 방향을 보게 한다
 function lookAt(x, z, tx, tz) {
