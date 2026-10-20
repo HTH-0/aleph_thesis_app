@@ -150,7 +150,9 @@ const TRAFFIC = (() => {
       }
       for (const piece of pieces) {
         const id = pieceId++, head = piece[0], tail = piece[piece.length - 1];
-        for (const [pts, from, to] of [[piece, head, tail], [piece.slice().reverse(), tail, head]]) for (const o of offs) {
+        // 한쪽에 차를 세운 골목(rd.parked, js/parked.js)은 길 방향 한 차로만, 세운 차 반대편으로 달린다
+        const dirs = rd.parked ? [[piece, head, tail]] : [[piece, head, tail], [piece.slice().reverse(), tail, head]];
+        for (const [pts, from, to] of dirs) for (const o of rd.parked ? [-1.0] : offs) {
           const S = offsetSamples(pts, o, 3);
           if (S.length < 2) continue;
           for (const p of S) p.y = rd.br ? scenery.deckY(rd, p.x, p.z) : 0; // 다리·고가 위는 그 높이로 달린다
@@ -743,7 +745,7 @@ const TRAFFIC = (() => {
           offRoad.samples++;
           if (!onRoad(car.x, car.z, 0.5)) offRoad.off++;
           const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw), l = car.halfL * 0.9, w = car.halfW;
-          if ([[l, w], [l, -w], [-l, w], [-l, -w]].some(([a, s]) => !onRoad(car.x + fx * a - fz * s, car.z + fz * a + fx * s, 0))) { offRoad.body++; offRoad.byModel[car.model || car.type] = (offRoad.byModel[car.model || car.type] || 0) + 1; }
+          if ([[l, w], [l, -w], [-l, w], [-l, -w]].some(([a, s]) => !onRoad(car.x + fx * a - fz * s, car.z + fz * a + fx * s, 0))) { offRoad.body++; const mk = (car.model || car.type) + (car.lane.rd.parked ? "(일방)" : car.trans ? "(회전)" : ""); offRoad.byModel[mk] = (offRoad.byModel[mk] || 0) + 1; }
         }
       }
       draw(dt);

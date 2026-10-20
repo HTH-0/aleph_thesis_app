@@ -1118,14 +1118,17 @@ const SCENERY = (() => {
     for (const [x, z] of pillarSpots) obstacles.add(x - 0.9, z - 0.9, x + 0.9, z + 0.9, { x, z, r: 0.9 });
     const rampIdx = makeIndex(12);
     for (const s of rampSegs) rampIdx.add(Math.min(s.a[0], s.b[0]) - s.hw, Math.min(s.a[1], s.b[1]) - s.hw, Math.max(s.a[0], s.b[0]) + s.hw, Math.max(s.a[1], s.b[1]) + s.hw, s);
+    // 가로수: 모델(js/trees.js)이 있으면 EZ-Tree 나무, 없으면 예전 다면체 나무
+    const treeLod = typeof TREES !== "undefined" && TREES.ready() ? TREES.build(group, trees, hash) : null;
+    if (treeLod) for (const [x, z] of trees) obstacles.add(x - 0.3, z - 0.3, x + 0.3, z + 0.3, { x, z, r: 0.3 });
     const trunkGeo = new THREE.CylinderGeometry(0.13, 0.2, 3, 6); trunkGeo.translate(0, 1.5, 0);
     const crownGeo = new THREE.IcosahedronGeometry(2, 0); crownGeo.translate(0, 4.4, 0);
     const trunk = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: lin("#5b4a3c"), roughness: 1 }), Math.max(1, trees.length));
     const crown = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true }), Math.max(1, trees.length));
     // 가을 은행나무처럼 일부는 노랗게 칠한다
     const greens = ["#5f8a45", "#6f9a4c", "#557d3f", "#7ea152", "#c8b03c", "#d9be45", "#8fa648"].map(lin);
-    trunk.count = crown.count = trees.length;
-    trees.forEach(([x, z], i) => {
+    trunk.count = crown.count = treeLod ? 0 : trees.length;
+    if (!treeLod) trees.forEach(([x, z], i) => {
       const s = 0.8 + hash(i * 1.7) * 0.5;
       dummy.position.set(x, 0, z); dummy.rotation.set(0, hash(i) * 6.28, 0); dummy.scale.set(s, s * (0.9 + hash(i * 2.3) * 0.4), s);
       dummy.updateMatrix();
@@ -1160,6 +1163,12 @@ const SCENERY = (() => {
       addObstacle: (x, z, r) => obstacles.add(x - r, z - r, x + r, z + r, { x, z, r }),
     }) : null;
     if (props && props.coneModel) coneMesh.count = baseMesh.count = 0; // 코드로 그린 라바콘 대신 모델
+    // 주차된 차 (차량 모델을 불러왔을 때만). 골목에 세우면 그 골목은 일방통행이 된다
+    const parked = typeof PARKED !== "undefined" ? PARKED.place({
+      group, roads, green: sc.green, crossings, kindAt, onCarway, nearExit, hash, pointInPoly, quality: CONFIG.QUALITY, size,
+      blocked: (x, z, r) => hits(x, z, r),
+      addObstacle: (x, z, r) => obstacles.add(x - r, z - r, x + r, z + r, { x, z, r }),
+    }) : null;
 
     scene.add(group);
 
@@ -1181,15 +1190,17 @@ const SCENERY = (() => {
       return false;
     }
 
-    // 매 프레임: 경고등 깜빡임
-    function tick(now) {
+    // 매 프레임: 경고등 깜빡임, 신호, 가까운 나무를 입체로 (나무를 바꾸면 그림자 지도도 다시 그린다)
+    function tick(now, cam) {
       lampMat.emissiveIntensity = Math.sin(now * 0.004) > 0 ? 1.8 : 0.15;
       updateSignals(now / 1000);
+      if (treeLod && cam && treeLod.update(cam.x, cam.z)) renderer.shadowMap.needsUpdate = true;
+      if (parked && cam && parked.update(cam.x, cam.z)) renderer.shadowMap.needsUpdate = true;
     }
     // 가장자리 가림막 앞인지 (안내 문구를 띄울 때 쓴다)
     const nearEdge = (x, z) => x < EDGE_BAND + 1.2 || z < EDGE_BAND + 1.2 || x > size - EDGE_BAND - 1.2 || z > size - EDGE_BAND - 1.2;
 
-    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, trees: trees.length, exits: exits.length, props: props && props.counts },
+    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, trees: trees.length, treeModels: !!treeLod, parked: parked && parked.count, parkedAlleys: parked && parked.alleys, parkedSamples: parked && parked.samples, exits: exits.length, props: props && props.counts }, treeStats: () => (treeLod ? treeLod.stats() : null),
       exits: exits.map(({ e, t0, t1 }) => { const [x, z] = e.along((t0 + t1) / 2); return { x, z, inward: e.inward, width: t1 - t0 }; }) };
   }
 

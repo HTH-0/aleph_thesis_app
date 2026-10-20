@@ -1,0 +1,66 @@
+{
+ "source": "EZ-Tree 1.1.0 (Daniel Greenheck, MIT License, https://github.com/dgreenheck/ez-tree). 잎 텍스처는 EZ-Tree(MIT), 나무껍질 텍스처는 ambientCG(CC0)",
+ "made": "tools/make_trees.mjs",
+ "trees": [
+  {
+   "id": "ginkgo_7",
+   "species": "ginkgo",
+   "seed": 7,
+   "height": 9.5,
+   "triangles": 8392,
+   "cardHalfWidth": 4.75,
+   "leafTint": "#fff4a0",
+   "barkTint": "#b7a99a"
+  },
+  {
+   "id": "ginkgo_41",
+   "species": "ginkgo",
+   "seed": 41,
+   "height": 9.5,
+   "triangles": 8392,
+   "cardHalfWidth": 4.75,
+   "leafTint": "#fff4a0",
+   "barkTint": "#b7a99a"
+  },
+  {
+   "id": "zelkova_21",
+   "species": "zelkova",
+   "seed": 21,
+   "height": 9,
+   "triangles": 6752,
+   "cardHalfWidth": 4.5,
+   "leafTint": "#e8d27a",
+   "barkTint": "#9a9086"
+  },
+  {
+   "id": "zelkova_58",
+   "species": "zelkova",
+   "seed": 58,
+   "height": 9,
+   "triangles": 6752,
+   "cardHalfWidth": 4.5,
+   "leafTint": "#e8d27a",
+   "barkTint": "#9a9086"
+  },
+  {
+   "id": "plane_3",
+   "species": "plane",
+   "seed": 3,
+   "height": 10,
+   "triangles": 5302,
+   "cardHalfWidth": 5.05,
+   "leafTint": "#f0f0b0",
+   "barkTint": "#d8d2c0"
+  },
+  {
+   "id": "plane_77",
+   "species": "plane",
+   "seed": 77,
+   "height": 10,
+   "triangles": 5302,
+   "cardHalfWidth": 5,
+   "leafTint": "#f0f0b0",
+   "barkTint": "#d8d2c0"
+  }
+ ]
+}

@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>가로수 만들기</title>
+<!-- tools/make_trees.mjs가 헤드리스 Chrome으로 연다. EZ-Tree(MIT)로 나무를 만들어 GLB와 멀리 보이는 사진판(PNG)을 돌려준다 -->
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/","ez":"https://cdn.jsdelivr.net/npm/@dgreenheck/ez-tree@1.1.0/build/ez-tree.es.js"}}</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { Tree } from "ez";
+
+// 종류: 은행나무(10월 노란 잎), 느티나무(물들기 시작), 플라타너스(초록). 키는 실제 가로수 크기(m)
+// 면 수를 줄이려고 가지 단면(segments)과 마디(sections)를 줄이고, 잎은 적게 크게 단다
+const SPECIES = {
+  ginkgo: { preset: "Ash Medium", height: 9.5, edit(o) {
+    o.branch.angle[1] = 28; o.branch.angle[2] = 30; o.branch.children[0] = 9; o.branch.length[1] *= 0.55;
+    o.leaves.type = "aspen"; o.leaves.tint = 0xfff4a0; o.bark.tint = 0xb7a99a; } },
+  zelkova: { preset: "Ash Medium", height: 9, edit(o) {
+    o.branch.angle[1] = 38; o.branch.start[1] = 0.25; o.branch.children[0] = 7; o.branch.length[1] *= 1.1;
+    o.leaves.type = "ash"; o.leaves.tint = 0xe8d27a; o.bark.tint = 0x9a9086; } },
+  plane: { preset: "Oak Medium", height: 10, edit(o) {
+    o.leaves.type = "oak"; o.leaves.tint = 0xf0f0b0; o.bark.tint = 0xd8d2c0; } },
+};
+const LEAVES = 9, LEAF_SIZE = 1.9; // 가지 끝마다 잎 수, 잎 크기 배율
+
+function build(name, seed) {
+  const s = SPECIES[name], t = new Tree();
+  t.loadPreset(s.preset);
+  const o = t.options;
+  o.seed = seed; o.branch.levels = 3;
+  s.edit(o);
+  o.leaves.count = LEAVES; o.leaves.size *= LEAF_SIZE;
+  o.leaves.billboard = "single"; // 잎 한 장씩 (십자 두 장은 겹쳐 그리는 면이 두 배라 가까운 나무 10그루에 fps가 39 → 20으로 떨어졌다)
+  const sec = [6, 4, 3, 2], seg = [6, 4, 3, 3];
+  for (const k of [0, 1, 2, 3]) { o.branch.sections[k] = Math.min(o.branch.sections[k], sec[k]); o.branch.segments[k] = Math.min(o.branch.segments[k], seg[k]); }
+  t.generate();
+  // 실제 키로 맞추고 밑동을 원점에
+  const box = new THREE.Box3().setFromObject(t), k = s.height / (box.max.y - box.min.y);
+  t.scale.setScalar(k); t.updateMatrixWorld(true);
+  return { tree: t, tris: t.triangleCount, leafTint: o.leaves.tint, barkTint: o.bark.tint };
+}
+
+async function toGLB(obj) {
+  return new Promise((ok, fail) => new GLTFExporter().parse(obj, (buf) => ok(buf), fail, { binary: true, maxTextureSize: 512 }));
+}
+const b64 = (buf) => { let s = ""; const a = new Uint8Array(buf); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode(...a.subarray(i, i + 0x8000)); return btoa(s); };
+
+// 멀리 보이는 나무용 사진판: 옆에서 본 모습을 투명 배경으로 찍는다 (위쪽 반은 앞에서, 아래쪽 반은 90도 돌려서)
+const R = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+R.setSize(256, 256); R.outputColorSpace = THREE.SRGBColorSpace; R.setClearColor(0x000000, 0);
+function card(tree, height) {
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xe8f0f8, 0x8a7f70, 2.2));
+  const sun = new THREE.DirectionalLight(0xfff0d6, 2.4); sun.position.set(-3, 6, 4); scene.add(sun);
+  scene.add(tree);
+  const box = new THREE.Box3().setFromObject(tree), w = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2 + 0.3;
+  const half = Math.max(w, height / 2); // 가로세로 같은 칸에 나무 전체가 들어가게
+  const cam = new THREE.OrthographicCamera(-half, half, half * 2, 0, 0.1, 100);
+  cam.position.set(0, 0, 30); cam.lookAt(0, 0, 0);
+  R.render(scene, cam);
+  const url = R.domElement.toDataURL("image/png");
+  scene.remove(tree);
+  return { url, half };
+}
+
+// 텍스처 그림을 PNG/JPEG 데이터로 (게임은 종류마다 한 장을 같이 쓴다)
+function imageData(tex, type, max) {
+  const im = tex.image, k = Math.min(1, max / Math.max(im.width, im.height));
+  const c = document.createElement("canvas"); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+  return c.toDataURL(type, 0.85).split(",")[1];
+}
+window.make = async (name, seed) => {
+  const { tree, tris, leafTint, barkTint } = build(name, seed);
+  // 텍스처를 다 불러온 뒤에 찍고 내보낸다
+  await new Promise((r) => setTimeout(r, 1500));
+  const c = card(tree, SPECIES[name].height);
+  let leaf = null, bark = null;
+  tree.traverse((o) => {
+    if (!o.isMesh) return;
+    const m = o.material;
+    if (m.name === "leaves" || m.alphaTest > 0) { leaf = imageData(m.map, "image/png", 512); }
+    else if (m.map) { bark = imageData(m.map, "image/jpeg", 512); }
+    // 모양만 내보낸다: 지도와 색은 게임이 종류별로 붙인다
+    o.material = new THREE.MeshStandardMaterial({ name: m.name || (m.alphaTest > 0 ? "leaves" : "branches") });
+  });
+  const glb = await toGLB(tree);
+  return { name, seed, tris, height: SPECIES[name].height, glb: b64(glb), card: c.url.split(",")[1], cardHalf: c.half, leaf, bark, leafTint: "#" + leafTint.toString(16).padStart(6, "0"), barkTint: "#" + barkTint.toString(16).padStart(6, "0") };
+};
+window.READY = true;
+</script>

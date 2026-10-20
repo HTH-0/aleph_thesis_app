@@ -137,6 +137,7 @@ function runRound(spec, onComplete) {
       exits: scenery.exits,
       traffic: () => traffic.stats(),
       scenery: () => scenery.stats,
+      trees: () => scenery.treeStats(),
       peds: () => traffic.pedList(),
       cars: () => traffic.carList(),
       freeze(on) { frozen = !!on; },
@@ -281,7 +282,7 @@ function runRound(spec, onComplete) {
       }
     }
     updateSky();
-    scenery.tick(now);
+    scenery.tick(now, camera.position);
     if (!frozen) traffic.update(dt, now / 1000, camera.position, yaw);
     renderer.render(scene, camera);
   }
