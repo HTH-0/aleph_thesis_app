@@ -3,7 +3,8 @@
 // 실행: node tools/build_maps.mjs            (모든 지역)
 //       node tools/build_maps.mjs jamsil     (한 지역만, 여러 개는 쉼표로)
 //       node tools/build_maps.mjs --fresh    (저장해 둔 OSM 원본 대신 Overpass에서 새로 받는다)
-// 공공데이터(횡단보도, 보도 폭, 건물)는 참고자료/공공데이터/에 있어야 쓴다. 받는 방법은 tools/fetch_public.mjs와 README.md
+//       node tools/build_maps.mjs --refresh-sources  (참고자료/공공데이터/의 원본에서 지역 입력을 다시 잘라 낸다)
+// 입력은 tools/source/<지역>/에 저장해 두고 읽는다(저장소에 담겨 있어 원본 없이도 같은 지도가 나온다). 설명은 tools/source/README.md
 // 지도 데이터: © OpenStreetMap contributors, ODbL 1.0
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { readShapefile, readShapefileWhere, tmFromPrj } from "./shapefile.mjs";
@@ -14,8 +15,27 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(ROOT, "data");
 // 공공데이터 원본 (저장소와 배포물에는 넣지 않는다. 출처는 참고자료/공공데이터/출처.txt)
 const PUBLIC_DIR = join(ROOT, "참고자료", "공공데이터");
-const OSM_CACHE = join(ROOT, "참고자료", "osm_cache");
+const OSM_CACHE = join(ROOT, "참고자료", "osm_cache"); // 예전 위치. tools/source/가 없을 때만 옮겨 온다
 const FRESH = process.argv.includes("--fresh");
+const REFRESH_SOURCES = process.argv.includes("--refresh-sources");
+// 지도 생성 입력(지역 범위로 잘라 낸 원본). 저장소에 담아서 어느 PC에서든 같은 지도를 다시 만든다. 출처는 tools/source/README.md
+const SOURCE_DIR = join(ROOT, "tools", "source");
+// tools/source/<지역>/<이름>.json이 있으면 읽고, 없거나 --refresh-sources면 make()로 만들어 저장한다.
+// make()가 null을 돌려주면(원본 파일이 없는 PC) 저장하지 않고 null을 돌려준다.
+async function sourced(region, name, make) {
+  const file = join(SOURCE_DIR, region.id, name + ".json");
+  if (!REFRESH_SOURCES && existsSync(file)) return JSON.parse(readFileSync(file, "utf8"));
+  const v = await make();
+  if (v !== null && v !== undefined) {
+    mkdirSync(join(SOURCE_DIR, region.id), { recursive: true });
+    writeFileSync(file, JSON.stringify(v));
+    console.log(`[${region.id}] 입력 저장: tools/source/${region.id}/${name}.json`);
+  } else if (existsSync(file)) {
+    console.warn(`[${region.id}] 원본이 없어 저장해 둔 입력을 씁니다: tools/source/${region.id}/${name}.json`);
+    return JSON.parse(readFileSync(file, "utf8"));
+  }
+  return v ?? null;
+}
 const PUBLIC_CROSSWALKS = {
   seoul: { file: "seoul_crosswalk/A004_A", source: "서울시 교통안전시설물 횡단보도 정보 (서울 열린데이터광장, 공공누리 제1유형)" },
   daegu: { file: "daegu_crosswalk/A0043325", source: "대구광역시_횡단보도 (공공데이터포털)" },
@@ -256,19 +276,20 @@ async function buildRegion(region) {
   node[highway=crossing](${bb});
 );
 out geom;`;
-  // 받은 OSM 원본은 참고자료/osm_cache/에 저장해 두고 다시 쓴다 (서버 오류로 멈추지 않고, 같은 원본으로 다시 만들 수 있게).
+  // OSM 원본은 tools/source/<지역>/osm.json을 쓴다 (서버 오류로 멈추지 않고, 같은 원본으로 다시 만들 수 있게).
   // 새로 받으려면 --fresh를 붙인다
-  const cacheFile = join(OSM_CACHE, `${region.id}.json`);
+  const osmFile = join(SOURCE_DIR, region.id, "osm.json");
   let data;
-  if (!FRESH && existsSync(cacheFile)) {
-    data = JSON.parse(readFileSync(cacheFile, "utf8"));
-    console.log(`[${region.id}] OSM 원본: ${cacheFile} (${data.osm3s?.timestamp_osm_base || "시각 모름"})`);
+  if (!FRESH && existsSync(osmFile)) {
+    data = JSON.parse(readFileSync(osmFile, "utf8"));
   } else {
-    console.log(`[${region.id}] Overpass 요청`);
-    data = await overpass(query);
-    mkdirSync(OSM_CACHE, { recursive: true });
-    writeFileSync(cacheFile, JSON.stringify(data));
+    const old = join(OSM_CACHE, `${region.id}.json`);
+    if (!FRESH && existsSync(old)) data = JSON.parse(readFileSync(old, "utf8"));
+    else { console.log(`[${region.id}] Overpass 요청`); data = await overpass(query); }
+    mkdirSync(join(SOURCE_DIR, region.id), { recursive: true });
+    writeFileSync(osmFile, JSON.stringify(data));
   }
+  console.log(`[${region.id}] OSM 원본 시각: ${data.osm3s?.timestamp_osm_base || "모름"}`);
 
   const [lat0, lon0] = region.center;
   const mx = 111320 * Math.cos((lat0 * Math.PI) / 180);
@@ -409,7 +430,7 @@ out geom;`;
   // 같은 건물(겹치는 넓이가 작은 쪽의 50% 이상)이면 모양은 공공데이터를 쓴다. 층수는 건축물대장 → OSM → 추정 순서다.
   // 한 건물의 모양과 높이는 한 출처에서만 가져온다(CC BY 공공데이터와 ODbL을 한 레코드에 섞지 않는다):
   //  공공 건물에 층수가 있으면 공공 건물, 없고 겹치는 OSM 건물에 층수 기록이 있으면 OSM 건물, 둘 다 없으면 공공 모양에 추정 높이.
-  const gov = publicBuildings(region, toXZ);
+  const gov = await sourced(region, "buildings", () => publicBuildings(region, toXZ));
   const bstat = { gov: 0, osm: 0, matched: 0, govOnly: 0, osmOnly: 0, osmKept: 0, govDropped: 0, onRoad: 0, floorGap: [] };
   if (!gov) {
     for (const o of osmBuildings) {
@@ -538,7 +559,7 @@ out geom;`;
   // OSM에 width 태그가 없는 차도는 공공 횡단보도 도형이 그 차도를 가로지르는 길이(연석에서 연석까지)로 폭을 다시 정한다.
   // 두 줄 차도처럼 횡단보도 하나가 여러 차도를 건너면, 각 점을 가장 가까운 차도에 나눠 센다.
   // 같은 이름·종류의 차도는 한 길이 여러 조각으로 나뉜 것이므로, 횡단보도가 없는 조각도 그 길의 값을 쓴다.
-  const pub = publicCrosswalks(region, toXZ, size);
+  const pub = await sourced(region, "crosswalks", () => publicCrosswalks(region, toXZ, size));
   const carRoads = roads.filter((rd) => rd.k === "car");
   const segs = [];
   for (const rd of carRoads) for (let i = 0; i + 1 < rd.p.length; i++) {
@@ -602,7 +623,8 @@ out geom;`;
     if (own) widthMeasured++; else widthByName++;
   }
   // 보도 폭: 서울은 보도 통계의 노선명별 폭(가운값), 나머지는 큰길 SIDEWALK, 그 밖의 길 SIDEWALK / 2
-  const walkWidth = sidewalkWidths(region);
+  const walkTable = await sourced(region, "sidewalks", () => { const t = sidewalkWidths(region); return t ? Object.fromEntries(t) : null; });
+  const walkWidth = walkTable ? new Map(Object.entries(walkTable)) : null;
   let sidewalkMatched = 0;
   for (const rd of carRoads) {
     const m = carMeta.get(rd), sw = walkWidth && m.name ? walkWidth.get(m.name) : null;
@@ -891,7 +913,8 @@ out geom;`;
     id: region.id, name: region.name, desc: region.desc,
     center: region.center, size, cell: CELL, n: N,
     attribution: "© OpenStreetMap contributors (ODbL)",
-    builtAt: new Date().toISOString().slice(0, 10),
+    // 만든 날 대신 입력 OSM 원본의 날짜를 적는다 (같은 입력이면 어느 PC에서 다시 만들어도 파일이 똑같게)
+    builtAt: (data.osm3s?.timestamp_osm_base || new Date().toISOString()).slice(0, 10),
     grid: rows, landmarks: merged,
     scenery: { buildings, roads, green, trees, crossings, crosswalks, junctionsOpen: usedJunctions, crosswalkSource: hasPublic ? "public" : "rule" },
     sources: {
@@ -919,7 +942,7 @@ out geom;`;
 const ids = process.argv.slice(2).find((a) => !a.startsWith("--"));
 const only = ids ? ids.split(",") : null;
 for (const region of REGIONS.filter((r) => !only || only.includes(r.id))) {
-  const cached = !FRESH && existsSync(join(OSM_CACHE, `${region.id}.json`));
+  const cached = !FRESH && (existsSync(join(SOURCE_DIR, region.id, "osm.json")) || existsSync(join(OSM_CACHE, `${region.id}.json`)));
   await buildRegion(region);
   if (!cached) await new Promise((r) => setTimeout(r, 3000)); // Overpass 서버에 연달아 요청하지 않는다
 }

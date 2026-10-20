@@ -22,6 +22,6 @@ for (const region of regions) {
     await sleep(secs * 1000);
   }
   const t = await P("traffic()"), perf = await P("perf()");
-  console.log(`[${region}] 차 가운데가 차도 밖 ${t.offRoadPct}% · 차체가 연석을 넘음 ${t.bodyOffPct}% (표본 ${t.offRoadSamples}) · 교차로 통과 ${t.joins}회 중 8m 넘게 건너뜀 ${t.longJoins}회 · 막다른 길에서 사라짐 ${t.deadEnds}회 · 차 ${t.cars} · 행인 ${t.peds} · ${perf.fps} · 그리기 ${perf.calls}회 · 삼각형 ${Math.round(perf.triangles / 1000)}k`);
+  console.log(`[${region}] 차 가운데가 차도 밖 ${t.offRoadPct}% · 차체가 연석을 넘음 ${t.bodyOffPct}% (표본 ${t.offRoadSamples}) · 교차로 통과 ${t.joins}회 중 8m 넘게 건너뜀 ${t.longJoins}회 · 막다른 길에서 사라짐 ${t.deadEnds}회 · 연석 넘은 차종 ${JSON.stringify(t.bodyOffByModel || {})} · 차 ${t.cars} · 행인 ${t.peds} · ${perf.fps} · 그리기 ${perf.calls}회 · 삼각형 ${Math.round(perf.triangles / 1000)}k`);
 }
 b.close();

@@ -190,7 +190,7 @@ const TRAFFIC = (() => {
     }
     const onRoad = (x, z, m) => (roadCells.get(Math.floor(x / RC) + "," + Math.floor(z / RC)) || []).some((s) => segDist(x, z, s.a, s.b) <= s.hw + m);
     // off: 차 가운데가 노면 밖(0.5m 여유), body: 차체 네 모서리 가운데 하나라도 노면 밖(연석을 넘음)
-    const offRoad = { samples: 0, off: 0, body: 0, last: 0 };
+    const offRoad = { samples: 0, off: 0, body: 0, last: 0, byModel: {} }; // byModel: 연석을 넘은 표본을 차종별로
     const joins = { n: 0, long: 0, noNext: 0 }; // 교차로에서 다음 차로로 넘어간 횟수, 그중 8m 넘게 건너뛴 횟수, 이어 갈 차로가 없어 사라진 횟수
 
     const lanePoints = makeIndex(20);
@@ -571,7 +571,8 @@ const TRAFFIC = (() => {
       const stopAt = (dist) => { limit = Math.min(limit, Math.max(0, (dist - 1) * 1.2)); };
       const front = car.s + car.halfL;
       // 신호와 횡단보도
-      for (const st of ln.stops) {
+      // 교차로를 도는 중에는 신호·정지선을 보지 않는다(이미 교차로 안이라 서면 차체가 연석 위에 걸친 채 멈춘다, 2026-10-20 측정)
+      for (const st of car.trans ? [] : ln.stops) {
         const dist = st.s - 3 - front;
         if (dist < -3 || dist > 35) continue;
         if (st.signal) {
@@ -607,6 +608,7 @@ const TRAFFIC = (() => {
       }
       return limit;
     }
+    // 지금 차로가 끝나는 교차로에서 시작하는 차로 가운데 하나를 고른다 (같은 길로 되돌아가는 유턴은 하지 않는다)
     function nextLane(car) {
       const ln = car.lane, end = ln.pts[ln.pts.length - 1], pre = ln.pts[Math.max(0, ln.pts.length - 3)];
       const hx = end.x - pre.x, hz = end.z - pre.z, hl = Math.hypot(hx, hz) || 1;
@@ -633,7 +635,8 @@ const TRAFFIC = (() => {
       for (let i = cars.length - 1; i >= 0; i--) {
         const car = cars[i];
         if (Math.hypot(car.x - player.x, car.z - player.z) > R + 30) { cars.splice(i, 1); continue; }
-        const target = car.trans ? Math.min(car.lane.wide ? CONFIG.CAR_SPEED : CONFIG.CAR_SPEED_ALLEY, 6) : carTarget(car, t, player);
+        // 교차로를 도는 동안에는 천천히(6m/s 이하) 가되, 앞의 플레이어·행인·차는 똑같이 본다
+        const target = car.trans ? Math.min(6, carTarget(car, t, player)) : carTarget(car, t, player);
         car.braking = target < car.v - 0.2;
         car.v += Math.max(-7 * dt, Math.min(2.5 * dt, target - car.v));
         if (car.v < 0) car.v = 0;
@@ -641,8 +644,8 @@ const TRAFFIC = (() => {
         if (car.trans) {
           // 교차로: 지금 차로 끝에서 다음 차로 시작까지, 교차로 가운데 쪽으로 휘는 곡선(2차 베지에)을 따라간다
           const tr = car.trans;
-          tr.t += (car.v * dt) / tr.len;
-          if (tr.t >= 1) { car.trans = null; car.s = 0; }
+          tr.s += car.v * dt;
+          if (tr.s >= tr.len) { car.trans = null; car.s = 0; }
           else {
             const t1 = tr.t, u = 1 - t1, { a, b, c } = tr;
             car.x = u * u * a.x + 2 * u * t1 * c.x + t1 * t1 * b.x;
@@ -658,7 +661,7 @@ const TRAFFIC = (() => {
           const nl = nextLane(car);
           if (!nl) { joins.noNext++; cars.splice(i, 1); continue; }
           const a = car.lane.pts[car.lane.pts.length - 1], b = nl.pts[0], c = car.lane.node;
-          car.lane = nl;
+          car.lane = nl; car.s = 0; // 교차로를 도는 동안에도 다음 차로의 신호·횡단보도를 본다
           const chord = Math.hypot(b.x - a.x, b.z - a.z);
           const len = (chord + Math.hypot(c.x - a.x, c.z - a.z) + Math.hypot(b.x - c.x, b.z - c.z)) / 2; // 곡선 길이 어림값
           joins.n++; if (chord > 8) joins.long++;
@@ -740,7 +743,7 @@ const TRAFFIC = (() => {
           offRoad.samples++;
           if (!onRoad(car.x, car.z, 0.5)) offRoad.off++;
           const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw), l = car.halfL * 0.9, w = car.halfW;
-          if ([[l, w], [l, -w], [-l, w], [-l, -w]].some(([a, s]) => !onRoad(car.x + fx * a - fz * s, car.z + fz * a + fx * s, 0))) offRoad.body++;
+          if ([[l, w], [l, -w], [-l, w], [-l, -w]].some(([a, s]) => !onRoad(car.x + fx * a - fz * s, car.z + fz * a + fx * s, 0))) { offRoad.body++; offRoad.byModel[car.model || car.type] = (offRoad.byModel[car.model || car.type] || 0) + 1; }
         }
       }
       draw(dt);
@@ -775,7 +778,7 @@ const TRAFFIC = (() => {
       stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, pedPathLen: (() => { const l = pedPaths.map((p) => p.len).sort((a, b) => a - b); return [l[Math.floor(l.length * 0.25)], l[Math.floor(l.length * 0.5)], l[Math.floor(l.length * 0.75)]].map(Math.round); })(), lanes: lanes.length, crossings: scenery.crossings.length,
         waiting: peds.filter((p) => p.state === "wait").length, crossing: peds.filter((p) => p.state === "cross").length, carsStopped: cars.filter((c) => c.v < 0.3).length,
         offRoadPct: offRoad.samples ? +((offRoad.off / offRoad.samples) * 100).toFixed(1) : 0,
-        bodyOffPct: offRoad.samples ? +((offRoad.body / offRoad.samples) * 100).toFixed(1) : 0, offRoadSamples: offRoad.samples, joins: joins.n, longJoins: joins.long, deadEnds: joins.noNext, pedJumps: { ...pedJumps } }), };
+        bodyOffPct: offRoad.samples ? +((offRoad.body / offRoad.samples) * 100).toFixed(1) : 0, offRoadSamples: offRoad.samples, bodyOffByModel: { ...offRoad.byModel }, joins: joins.n, longJoins: joins.long, deadEnds: joins.noNext, pedJumps: { ...pedJumps } }), };
   }
 
   return { create };

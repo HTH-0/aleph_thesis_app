@@ -466,7 +466,8 @@ const SCENERY = (() => {
       } else {
         const minx = Math.min(...pts.map((p) => p[0])), maxx = Math.max(...pts.map((p) => p[0]));
         const minz = Math.min(...pts.map((p) => p[1])), maxz = Math.max(...pts.map((p) => p[1]));
-        const poly = { pts, minx, maxx, minz, maxz };
+        // res: 실외기·쓰레기봉투를 둘 만한 저층 주택류 (가게가 있으면 아래에서 shop으로 바뀐다)
+        const poly = { pts, minx, maxx, minz, maxz, i, res: !isApt && !isChurch && (isLow || isWood || b.st === "b" || b.st === "k" || h <= 16) };
         polys.push(poly);
         solids.add(minx, minz, maxx, maxz, poly);
         if (isApt) {
@@ -487,6 +488,8 @@ const SCENERY = (() => {
           addWalls(BG, pts, 0, h, lin(["#cfe0ea", "#bcd0db", "#d9e2e6"][Math.floor(r * 3)]), 3, 4, FLOOR, 4, i, 0.8);
         } else {
           const hasShop = !isLow && !isChurch && area > 40 && h > SHOP_H + 2;
+          poly.shop = hasShop; // 거리 소품을 놓을 때 쓴다 (가게 앞 상자·화분, 주택 옆 실외기)
+          if (hasShop) poly.res = false;
           // 구조가 있으면 벽돌·블록 벽, 없으면 창문 벽과 띠창 벽 가운데 하나 (2005년 이후 건물은 띠창을 더 자주)
           const [target, wallTint] = b.st === "b" && !isChurch ? [BBRICK, pick(BRICK_WALL)]
             : b.st === "k" ? [BBLOCK, tint]

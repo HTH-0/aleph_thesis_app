@@ -53,8 +53,8 @@ npx serve -l 5173 .
   - 파일은 브이월드에 로그인해서 받습니다(서울특별시, 대구광역시 SHP). 받은 zip을 `참고자료/공공데이터/vworld_building/seoul/`, `.../daegu/`에 풉니다.
 - 차도 폭: OSM `width` 태그가 없는 차도는 공공 횡단보도 도형이 그 차도를 가로지르는 길이로 폭을 다시 잽니다. 같은 이름의 길 조각에도 그 값을 씁니다. 큰 차도(10m 이상)인지 아닌지는 바꾸지 않습니다.
 - 보도 폭(서울): [서울시 보도 통계자료](https://data.seoul.go.kr/dataList/OA-22240/F/1/datasetView.do)(서울특별시, 공공누리 제1유형, 2025-12-31 기준)의 노선별 보도 폭을 OSM 도로 이름과 맞춰 씁니다. 지역이 속한 자치구 구간을 먼저 봅니다. 대구와 이름이 맞지 않는 길은 큰길 4m, 그 밖의 길 2m로 둡니다. 건물과 보도 사이에 남는 4m 이하 틈은 가게 앞 공간으로 보고 걸을 수 있게 합니다.
-- 지도: © OpenStreetMap contributors, ODbL 1.0. `tools/build_maps.mjs`로 받아 `data/*.json`(이동 판정용 2m 격자, 장소 위치, 화면에 그릴 건물·도로·녹지·나무)으로 저장했습니다. 층수 기록이 없는 건물은 용도와 바닥 면적으로 높이를 추정하고, 건물이 없는 넓은 빈 땅에는 저층 건물을 채워 그립니다. 받은 OSM 원본은 `참고자료/osm_cache/`에 저장해 두고 다시 씁니다. 다시 만들려면 `node tools/build_maps.mjs`, OSM을 새로 받으려면 `node tools/build_maps.mjs --fresh`를 실행합니다.
-- 공공데이터 원본 받기: `node tools/fetch_public.mjs`가 횡단보도(서울·대구)와 서울 보도 통계를 `참고자료/공공데이터/`에 받습니다(로그인 필요 없음). 건물 파일만 직접 받습니다.
+- 지도: © OpenStreetMap contributors, ODbL 1.0. `tools/build_maps.mjs`로 받아 `data/*.json`(이동 판정용 2m 격자, 장소 위치, 화면에 그릴 건물·도로·녹지·나무)으로 저장했습니다. 층수 기록이 없는 건물은 용도와 바닥 면적으로 높이를 추정하고, 건물이 없는 넓은 빈 땅에는 저층 건물을 채워 그립니다. 지도 생성 입력(OSM 원본, 지역 범위로 잘라 낸 건물·횡단보도·보도 폭)은 [tools/source/](tools/source/README.md)에 담겨 있어서, 원본 없이도 `node tools/build_maps.mjs`로 같은 지도를 다시 만들 수 있습니다. OSM을 새로 받으려면 `--fresh`를 붙입니다.
+- 공공데이터 원본 받기(입력을 다시 잘라 낼 때만): `node tools/fetch_public.mjs`가 횡단보도(서울·대구)와 서울 보도 통계를 `참고자료/공공데이터/`에 받습니다(로그인 필요 없음). 건물 파일만 브이월드에서 직접 받습니다. 그다음 `node tools/build_maps.mjs --refresh-sources`를 실행합니다.
 - 소리: Pixabay Content License. 파일 목록과 주소는 [sounds/README.txt](sounds/README.txt)에 있습니다.
 - 차량·자전거·킥보드·라바콘 3D 모델: Sketchfab 작가들의 CC BY 4.0 모델. 모델마다 이름·작가·주소가 `assets/cars/*.json`, `assets/props/*.json`에 있고 첫 화면 출처 목록에도 씁니다. 크기·방향·면 수·텍스처 해상도를 줄이고 차 색을 바꾸고 상표 로고와 번호판을 지웠습니다(`tools/convert_cars.mjs`, `tools/convert_props.mjs`). 다른 게임에서 빼 온 모델은 쓰지 않습니다.
 - 행인 3D 모델과 동작: [Microsoft Rocketbox Avatar Library](https://github.com/microsoft/Microsoft-Rocketbox), MIT License(`assets/people/LICENSE.md`). `tools/fetch_people.mjs`로 받고 `tools/convert_people.mjs`로 바꿉니다.
