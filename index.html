@@ -109,7 +109,8 @@
           <li><span class="dot start"></span>출발</li>
           <li><span class="dot goal"></span>목적지 (금색 기둥)</li>
           <li><span class="dot road"></span>걸을 수 있는 길</li>
-          <li><span class="dot carway"></span>큰 차도 (횡단보도로만 건널 수 있음)</li>
+          <li><span class="dot carway"></span>큰 차도 (횡단보도나 지하도로만 건널 수 있음)</li>
+          <li id="legend-underpass" hidden><span class="dot underpass"></span>지하도 출구 (입구로 들어가면 나갈 출구를 고릅니다)</li>
         </ul>
         <div id="brief-sounds"></div>
         <p class="text-muted small">출발하면 지도는 사라집니다. 위쪽이 북쪽입니다.</p>
@@ -127,6 +128,13 @@
     </div>
     <pre id="play-hud" class="hud" hidden></pre>
     <p id="play-toast" class="play-toast" role="status" hidden>이 길은 공사 중이라 지나갈 수 없습니다. 다른 길로 돌아가 주세요.</p>
+    <!-- 지하도 출구 고르기 (js/game.js) -->
+    <div id="play-underpass" class="underpass" role="dialog" hidden>
+      <p data-title></p>
+      <ol data-list></ol>
+      <p class="small">숫자 키로 나갈 출구를 고르세요 · Q: 다시 올라가기</p>
+    </div>
+    <div id="play-fade" class="play-fade" hidden><p data-text></p></div>
     <div id="play-overlay" class="overlay hidden">
       <div class="overlay-box">
         <p data-msg></p>
@@ -170,7 +178,6 @@
   <script src="js/vehicles.js"></script>
   <script src="js/streetprops.js"></script>
   <script src="js/trees.js"></script>
-  <script src="js/parked.js"></script>
   <script src="js/traffic.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>

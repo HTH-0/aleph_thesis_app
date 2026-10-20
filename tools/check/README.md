@@ -13,6 +13,8 @@ Chrome을 못 찾으면 `CHROME_PATH` 환경 변수로 위치를 알려 준다.
 | `node tools/check/islands.mjs` | 차도·보도 자리인데 걷는 영역에서 떨어져 나간 길(막힌 땅·화단이 된 곳)의 비율과 위치를 지역마다 보여 준다. 지도 끝 20m 안 덩어리는 "가장자리"로 따로 센다 |
 | `node tools/check/crosswalk_xcheck.mjs` | 공공 횡단보도와 규칙 교차로의 일치 비율 표를 다시 만든다 (먼저 `node tools/fetch_public.mjs`) |
 | `node tools/check/shp_info.mjs <파일.shp>` | 새 공공데이터 Shapefile의 열 이름과 첫 값, 위경도 변환 결과를 보여 준다 |
+| `node tools/check/detour.mjs` | 직선 30~70m인 두 지점을 걸어서 4배 넘게 돌아가는 쌍을 찾고, 직선이 건물·막힌 땅을 가로지르는지(실제로도 돌아가는 곳) 큰 차도만 가로지르는지(횡단보도가 빠졌을 수 있는 곳)로 나눈다 → `out/detour-<지역>.png` (빨간 원), `out/detour.json` |
+| `node tools/check/soundroutes.mjs [시드 수]` | 지역마다 두 판 경로를 여러 번 뽑아 소리 기준 단계(js/world.js `pickRoutes`의 RULES)별 비율, 최단 거리, 출발점·목적지에서 가장 가까운 소리까지의 거리를 찍는다 |
 | `node tools/check/buildings.mjs` | 지역마다 건물 유형별 개수와 비율, 유형별 대표 건물 수를 보여 준다 (건물 모습 판정용) |
 | `node tools/check/sidewalk.mjs` | 차도마다 "양옆에 인도가 있다"는 가정을 데이터(큰길, 서울 보도 통계, 공공 횡단보도, 건물 간격)로 나누고, 게임 경로가 자주 지나는 확인 지점을 지역당 10곳 고른다 → `out/sidewalk_points.json` |
 

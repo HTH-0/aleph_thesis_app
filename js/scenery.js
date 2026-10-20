@@ -244,17 +244,16 @@ const SCENERY = (() => {
         g.fillStyle = "#1d1d1d";
         for (let x = -h; x < w + h; x += 64) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 32, h); g.lineTo(x + 32 + h, 0); g.lineTo(x + h, 0); g.fill(); }
       }, a),
-      // 보행자 방호 울타리: 2m × 1m. 기둥·가로대만 그리고 나머지는 투명하게 둔다
+      // 보행자 방호 울타리: 2m × 1.2m. 한국 큰길 보도의 흰 세로살 울타리 (살 사이 약 11cm). 살 사이만 투명하게 둔다
+      // 살이 가늘면 멀리서 안 보여서 길을 막는지 알기 어려웠다 (2026-10-20 사용자 확인). 살을 굵고 촘촘하게, 가장자리를 어둡게 그린다
       fence: (() => {
         const t = canvasTex(256, 128, (g, w, h) => {
           g.clearRect(0, 0, w, h);
-          g.fillStyle = "#d9dde0";
-          g.fillRect(0, 4, w, 10); g.fillRect(0, 60, w, 7); g.fillRect(0, 112, w, 8);
-          g.fillRect(0, 0, 10, h); g.fillRect(w - 10, 0, 10, h);
-          g.fillStyle = "#c3c9ce";
-          for (let x = 24; x < w - 10; x += 18) g.fillRect(x, 14, 4, 98);
-          g.fillStyle = "#2e8b57"; g.fillRect(90, 22, 76, 30); // 가운데 초록 표지판
-          g.fillStyle = "#f4f4f0"; g.fillRect(104, 32, 48, 10);
+          const bar = (x, y, bw, bh) => { g.fillStyle = "#6d7378"; g.fillRect(x - 1, y - 1, bw + 2, bh + 2); g.fillStyle = "#eef0f1"; g.fillRect(x, y, bw, bh); };
+          for (let x = 8; x < w - 8; x += 14) bar(x, 16, 6, 96); // 세로살
+          bar(0, 4, w, 14); bar(0, 104, w, 12); // 위·아래 가로대
+          bar(0, 0, 8, h); bar(w - 8, 0, 8, h); // 기둥
+          g.fillStyle = "#e8b828"; g.fillRect(0, 7, w, 4); // 위 가로대의 노란 반사띠
         }, a);
         return t;
       })(),
@@ -387,6 +386,117 @@ const SCENERY = (() => {
     const put = (x, y, z, u, v) => vtx(B, x, y, z, nx, 0, nz, u, v, col);
     put(a[0], y0, a[1], u0, 0); put(b[0], y1, b[1], u1, 1); put(b[0], y0, b[1], u1, 0);
     put(a[0], y0, a[1], u0, 0); put(a[0], y1, a[1], u0, 1); put(b[0], y1, b[1], u1, 1);
+  }
+
+  // 지하도 입구 (js/world.js placeUnderpass): 낮은 화강석 벽 세 면, 계단 바닥(그림), 기둥 넷과 유리 지붕, 출구 번호판.
+  // 바닥은 충돌 판정에 넣는다 (들어가는 쪽으로 밀고 들어가면 js/game.js가 출구 고르기를 띄운다)
+  function drawUnderpass(group, up, solids, aniso) {
+    const list = up.exits;
+    if (!list.length) return;
+    const lin = (h) => new THREE.Color(h).convertSRGBToLinear();
+    const WALL = buf(), POST = buf(), ROOF = buf(), PIT = buf(), SIGN = buf();
+    const stone = lin("#bdb8ae"), dark = lin("#3f4448"), glass = lin("#9fbfcc"), WHITE1 = new THREE.Color(1, 1, 1);
+    const box = (B, cx, cz, tx, tz, hl, hw, y0, y1, col) => {
+      const nx = -tz, nz = tx, P = (a, b) => [cx + tx * a + nx * b, cz + tz * a + nz * b];
+      const { pts } = orient([P(-hl, -hw), P(hl, -hw), P(hl, hw), P(-hl, hw)]);
+      addWalls(B, pts, y0, y1, col, 1, 1, y1 - y0, 1, 0, 0.92);
+      polyUp(B, pts, y1, 2, col);
+    };
+    // 계단 그림: 위(들어가는 쪽)가 밝고 아래(땅속)로 갈수록 어둡다
+    const pitTex = canvasTex(128, 256, (g, w, h) => {
+      for (let i = 0; i < 16; i++) {
+        const y = (i * h) / 16, k = 1 - i / 18;
+        g.fillStyle = `rgb(${Math.round(150 * k)},${Math.round(148 * k)},${Math.round(142 * k)})`; g.fillRect(0, y, w, h / 16);
+        g.fillStyle = `rgb(${Math.round(70 * k)},${Math.round(68 * k)},${Math.round(64 * k)})`; g.fillRect(0, y + h / 16 - 4, w, 4);
+      }
+      g.fillStyle = "#c9a227"; g.fillRect(6, 0, 4, h); g.fillRect(w - 10, 0, 4, h); // 양옆 손잡이
+    }, aniso);
+    // 번호판: 한 장에 출구마다 한 칸
+    const signTex = canvasTex(512, 96 * list.length, (g, w) => {
+      list.forEach((e, k) => {
+        const y = k * 96;
+        g.fillStyle = "#1f3f73"; g.fillRect(0, y, w, 96);
+        g.fillStyle = "#ffffff"; g.fillRect(14, y + 18, 60, 60);
+        g.fillStyle = "#1f3f73"; g.font = "bold 46px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
+        g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(e.no, 44, y + 50);
+        g.fillStyle = "#ffffff"; g.font = "bold 40px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
+        g.textAlign = "left"; g.fillText(`${up.station} · 지하도`, 92, y + 50);
+      });
+    }, aniso);
+    signTex.wrapS = signTex.wrapT = THREE.ClampToEdgeWrapping;
+    list.forEach((e, k) => {
+      const { x, z, tx, tz } = e, nx = -tz, nz = tx, hl = e.L / 2, hw = e.W / 2, t = 0.2;
+      const P = (a, b) => [x + tx * a + nx * b, z + tz * a + nz * b];
+      for (const s of [-1, 1]) box(WALL, x + nx * s * (hw - t / 2), z + nz * s * (hw - t / 2), tx, tz, hl, t / 2, 0, 1.05, stone);
+      box(WALL, x - tx * (hl - t / 2), z - tz * (hl - t / 2), tx, tz, t / 2, hw, 0, 1.05, stone);
+      for (const a of [-hl + 0.15, hl - 0.15]) for (const s of [-1, 1]) box(POST, x + tx * a + nx * s * (hw - 0.1), z + tz * a + nz * s * (hw - 0.1), tx, tz, 0.06, 0.06, 1.05, 2.6, dark);
+      box(ROOF, x, z, tx, tz, hl + 0.3, hw + 0.2, 2.6, 2.7, glass);
+      // 계단 바닥 (v = 1이 들어가는 쪽)
+      const q = [P(-hl + t, -hw + t), P(hl, -hw + t), P(hl, hw - t), P(-hl + t, hw - t)], uv = [[0, 0], [0, 1], [1, 1], [1, 0]];
+      for (const i of [0, 1, 2, 0, 2, 3]) vtx(PIT, q[i][0], 0.05, q[i][1], 0, 1, 0, uv[i][0], uv[i][1], WHITE1);
+      // 번호판: 지붕 앞 끝 위. 밖에서 볼 때 왼쪽에서 오른쪽으로 읽힌다 (보는 사람의 오른쪽은 -n 방향)
+      const A = P(hl + 0.32, hw), B = P(hl + 0.32, -hw), v0 = 1 - (k + 1) / list.length, v1 = 1 - k / list.length;
+      const S = [[A, 2.72, 0, v0], [B, 2.72, 1, v0], [B, 3.2, 1, v1], [A, 3.2, 0, v1]];
+      for (const i of [0, 1, 2, 0, 2, 3]) { const [p, y, u, v] = S[i]; vtx(SIGN, p[0], y, p[1], tx, 0, tz, u, v, WHITE1); }
+      const xs = e.pts.map((p) => p[0]), zs = e.pts.map((p) => p[1]);
+      const poly = { pts: orient(e.pts).pts, minx: Math.min(...xs), maxx: Math.max(...xs), minz: Math.min(...zs), maxz: Math.max(...zs), underpass: k };
+      solids.add(poly.minx, poly.minz, poly.maxx, poly.maxz, poly);
+    });
+    const plain = (extra) => new THREE.MeshStandardMaterial(Object.assign({ vertexColors: true, roughness: 0.85, metalness: 0 }, extra));
+    group.add(toMesh(WALL, plain({}), true), toMesh(POST, plain({ roughness: 0.5, metalness: 0.4 }), true));
+    const roof = toMesh(ROOF, plain({ transparent: true, opacity: 0.55, roughness: 0.15, side: THREE.DoubleSide, depthWrite: false }), false);
+    group.add(roof);
+    group.add(toMesh(PIT, new THREE.MeshBasicMaterial({ map: pitTex, side: THREE.DoubleSide }), false));
+    group.add(toMesh(SIGN, new THREE.MeshBasicMaterial({ map: signTex, side: THREE.DoubleSide }), false));
+  }
+
+  // 칸 가운데 점에서 inside(r, c)인 칸 덩어리의 경계 고리들 (marching squares). 대각선으로만 닿은 칸도 이어 본다
+  function traceLoops(inside, n, cell) {
+    const P = (r, c) => [(c + 0.5) * cell, (r + 0.5) * cell];
+    const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const next = new Map(), key = (p) => p[0].toFixed(2) + "," + p[1].toFixed(2);
+    const seg = (a, b) => next.set(key(a), { a, b });
+    for (let r = -1; r < n; r++) for (let c = -1; c < n; c++) {
+      // 네 점: 0 (r,c) 1 (r,c+1) 2 (r+1,c+1) 3 (r+1,c)
+      const v = [inside(r, c), inside(r, c + 1), inside(r + 1, c + 1), inside(r + 1, c)];
+      const k = (v[0] ? 1 : 0) | (v[1] ? 2 : 0) | (v[2] ? 4 : 0) | (v[3] ? 8 : 0);
+      if (k === 0 || k === 15) continue;
+      const p = [P(r, c), P(r, c + 1), P(r + 1, c + 1), P(r + 1, c)];
+      const e = [mid(p[0], p[1]), mid(p[1], p[2]), mid(p[2], p[3]), mid(p[3], p[0])]; // 위, 오른쪽, 아래, 왼쪽 변
+      // 안쪽을 왼쪽에 두는 방향으로 선분을 만든다 (변 번호 쌍)
+      const T = { 1: [[3, 0]], 2: [[0, 1]], 3: [[3, 1]], 4: [[1, 2]], 5: [[3, 2], [1, 0]], 6: [[0, 2]], 7: [[3, 2]], 8: [[2, 3]],
+        9: [[2, 0]], 10: [[0, 3], [2, 1]], 11: [[2, 1]], 12: [[1, 3]], 13: [[1, 0]], 14: [[0, 3]] }[k];
+      for (const [i, j] of T) seg(e[i], e[j]);
+    }
+    const loops = [];
+    for (const start of [...next.keys()]) {
+      if (!next.has(start)) continue;
+      const loop = [];
+      let k = start;
+      while (next.has(k)) { const s = next.get(k); next.delete(k); loop.push(s.a); k = key(s.b); }
+      if (loop.length >= 3) loops.push(loop);
+    }
+    return loops;
+  }
+  // 닫힌 고리를 Douglas-Peucker로 줄인다 (tol: 허용 오차 m)
+  function simplifyLoop(loop, tol) {
+    if (loop.length < 8) return loop;
+    const dp = (pts) => {
+      const a = pts[0], b = pts[pts.length - 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-9;
+      let far = -1, fd = 0;
+      for (let i = 1; i < pts.length - 1; i++) {
+        const d = Math.abs((b[0] - a[0]) * (a[1] - pts[i][1]) - (a[0] - pts[i][0]) * (b[1] - a[1])) / L;
+        if (d > fd) { fd = d; far = i; }
+      }
+      if (fd <= tol) return [a, b];
+      const l = dp(pts.slice(0, far + 1)), r = dp(pts.slice(far));
+      return l.slice(0, -1).concat(r);
+    };
+    // 첫 점에서 가장 먼 점으로 둘로 나눠 줄인다
+    let far = 0, fd = 0;
+    for (let i = 1; i < loop.length; i++) { const d = Math.hypot(loop[i][0] - loop[0][0], loop[i][1] - loop[0][1]); if (d > fd) { fd = d; far = i; } }
+    const A = dp(loop.slice(0, far + 1)), B = dp(loop.slice(far).concat([loop[0]]));
+    return A.slice(0, -1).concat(B.slice(0, -1));
   }
 
   const MARGIN = 350; // 지도 밖으로 배경을 그리는 거리(m). tools/build_maps.mjs의 SCENERY_MARGIN과 같다
@@ -570,22 +680,45 @@ const SCENERY = (() => {
       }
       if (touches) isHedge[r * n + c] = 1;
     }
-    // 화단 칸을 가로로 이어 붙이고, 아래 줄이 같은 폭이면 세로로도 합쳐서 상자 수를 줄인다
+    // 화단: 화단 칸 덩어리의 경계선을 칸 가운데 점으로 따라가서(marching squares) 모서리를 45도로 깎고,
+    // 선을 단순하게 줄여서 비스듬한 길을 따라 곧게 세운다 (칸을 그대로 쌓으면 대각선 길에서 계단 모양이 됐다, 2026-10-20)
     const BHEDGE = buf(), BHEDGETOP = buf();
     const HEDGE_H = 1.1;
-    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-      if (!isHedge[r * n + c]) continue;
-      let c1 = c;
-      while (c1 + 1 < n && isHedge[r * n + c1 + 1]) c1++;
-      let r1 = r;
-      const rowFull = (rr) => { for (let k = c; k <= c1; k++) if (!isHedge[rr * n + k]) return false; return true; };
-      while (r1 + 1 < n && rowFull(r1 + 1)) r1++;
-      for (let rr = r; rr <= r1; rr++) for (let k = c; k <= c1; k++) isHedge[rr * n + k] = 0;
-      const x0 = c * cell, x1 = (c1 + 1) * cell, z0 = r * cell, z1 = (r1 + 1) * cell;
-      const rect = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
-      addWalls(BHEDGE, rect, 0, HEDGE_H, ONE, 2, 1, HEDGE_H, 1, r * n + c, 0.8);
-      polyUp(BHEDGETOP, rect, HEDGE_H, 5, ONE);
+    const hedgeLoops = traceLoops((r, c) => r >= 0 && c >= 0 && r < n && c < n && isHedge[r * n + c] === 1, n, cell);
+    // traceLoops는 화단을 늘 같은 쪽에 두고 돌므로, 넓이 부호로 바깥 고리와 구멍(화단 안의 빈 땅)을 가린다.
+    // 가장 큰 고리는 늘 바깥 고리다. 벽 법선 방향은 그 고리의 원래 선분 하나로 한 번만 정한다
+    const signed = (loop) => loop.reduce((acc, a, i) => { const b = loop[(i + 1) % loop.length]; return acc + a[0] * b[1] - b[0] * a[1]; }, 0) / 2;
+    const raw = hedgeLoops.map((l) => ({ l, A: signed(l) }));
+    const big = raw.reduce((m, q) => (!m || Math.abs(q.A) > Math.abs(m.A) ? q : m), null);
+    let flip = false;
+    if (big) {
+      const [p, q] = big.l, L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+      const mx = (p[0] + q[0]) / 2 + ((q[1] - p[1]) / L) * 0.4, mz = (p[1] + q[1]) / 2 - ((q[0] - p[0]) / L) * 0.4;
+      const c = Math.floor(mx / cell), r = Math.floor(mz / cell);
+      flip = r >= 0 && c >= 0 && r < n && c < n && isHedge[r * n + c] === 1;
     }
+    const outers = [], holes = [];
+    for (const { l, A } of raw) {
+      let loop = simplifyLoop(l, 0.55);
+      if (loop.length < 3) continue;
+      if (flip) loop = loop.slice().reverse();
+      (Math.sign(A) === Math.sign(big.A) ? outers : holes).push({ pts: loop, area: Math.abs(A) });
+    }
+    const outerHoles = outers.map(() => []);
+    for (const h of holes) {
+      let best = -1;
+      outers.forEach((o, k) => { if (o.area > h.area && pointInPoly(h.pts[0][0], h.pts[0][1], o.pts) && (best < 0 || o.area < outers[best].area)) best = k; });
+      if (best >= 0) outerHoles[best].push(h.pts);
+    }
+    let hedgeSeed = 0;
+    outers.forEach((o, k) => {
+      const all = [o.pts, ...outerHoles[k]];
+      for (const ring of all) addWalls(BHEDGE, ring, 0, HEDGE_H, ONE, 2, 1, HEDGE_H, 1, hedgeSeed++, 0.8);
+      let tris = null;
+      try { tris = THREE.ShapeUtils.triangulateShape(o.pts.map((p) => new THREE.Vector2(p[0], p[1])), outerHoles[k].map((h) => h.map((p) => new THREE.Vector2(p[0], p[1])))); } catch (e) { tris = null; }
+      const flat = all.flat();
+      if (tris && tris.length) for (const t of tris) triUp(BHEDGETOP, flat[t[0]], flat[t[1]], flat[t[2]], HEDGE_H, 5, ONE);
+    });
     const dummy = new THREE.Object3D();
 
     // 도로
@@ -650,6 +783,13 @@ const SCENERY = (() => {
     const kindAt = (x, z) => { const c = Math.floor(x / cell), r = Math.floor(z / cell); return r < 0 || c < 0 || r >= n || c >= n ? -1 : map.kind[r * n + c]; };
     const WHITE = lin("#e9e7e1"), YELLOW = lin("#e8b828"), CURB = lin("#cfcbc3");
     const treeSpots = [], lampSpots = [];
+    const fenceSegs = []; // 세운 울타리 [a, b] (덮은 비율 점검과 빈 곳 채우기에 쓴다)
+    const FENCE_H = 1.2; // 보행자 방호 울타리 높이(m)
+    let fenceFill = 0;
+    // 차가 다니지만 걸을 수도 있는 차도(폭 NO_SIDEWALK_BELOW~WIDE_ROAD). 울타리 바깥이 이런 차도면 보도가 아니라 세우지 않는다
+    const laneSegs = [];
+    for (const rd of roads) if (rd.k === "car" && !rd.br && rd.w >= CONFIG.NO_SIDEWALK_BELOW && rd.w < CONFIG.WIDE_ROAD) for (let i = 0; i + 1 < rd.pts.length; i++) laneSegs.push({ a: rd.pts[i], b: rd.pts[i + 1], hw: rd.w / 2 });
+    const onLaneRoad = (x, z) => laneSegs.some((sg) => segDist2(x, z, sg.a, sg.b) < (sg.hw + 0.5) ** 2);
     function strip(S, o, width, y, col, dash) {
       for (let i = 0; i < S.length - 1; i++) {
         const s = S[i], t = S[i + 1];
@@ -778,12 +918,15 @@ const SCENERY = (() => {
       // 보행자 방호 울타리: 막힌 차도 칸과 보도 사이에 세우고, 횡단보도와 교차로 자리는 비운다
       for (const side of [-1, 1]) {
         const blockedAt = (q) => { const p = off(q, side * (hw - 0.6)); return kindAt(p[0], p[1]) === 3; };
+        // 바깥쪽(연석 밖 1~2m)이 걷는 칸일 때만 세운다 (교차로 안 회전 차로처럼 양옆이 모두 아스팔트인 곳에는 세우지 않는다)
+        const walkOut = (q) => [1.0, 2.0].some((d) => { const p = off(q, side * (hw + d)); return kindAt(p[0], p[1]) === 2 && !onLaneRoad(p[0], p[1]); });
         for (let i = 0; i < S.length - 1; i++) {
           const q0 = S[i], q1 = S[i + 1];
-          if (!blockedAt(q0) || !blockedAt(q1)) continue;
+          if (!blockedAt(q0) || !blockedAt(q1) || !walkOut(q0) || !walkOut(q1)) continue;
           let a = off(q0, side * (hw + 0.15)), b = off(q1, side * (hw + 0.15));
           if (side < 0) [a, b] = [b, a];
-          vquad(BFENCE, a, b, 0.02, 1.0, 0, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, ONE);
+          vquad(BFENCE, a, b, 0.02, FENCE_H, 0, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, ONE);
+          fenceSegs.push(Object.assign([a, b], { rd: rd.w }));
         }
       }
       sample(rd, 9).forEach((sp, k) => {
@@ -1001,7 +1144,60 @@ const SCENERY = (() => {
     }
     coneMesh.castShadow = baseMesh.castShadow = true;
     group.add(coneMesh, baseMesh, warnMesh);
+    // 울타리 빈 곳 채우기: 길 옆선만 따라 세우면 교차로 모서리·굽은 길·길이 합쳐지는 곳에서 경계의 15~26%가 비었다 (2026-10-20 측정).
+    // 막힌 차도 칸 덩어리의 경계선을 따라가서, 바깥이 걷는 칸이고 2.5m 안에 울타리가 없는 곳에 2m 이하 조각으로 세운다 (횡단보도 자리는 비운다)
+    {
+      const G = 10, idx = new Map(), at = (x, z) => Math.floor(x / G) + "," + Math.floor(z / G);
+      const addIdx = (sg) => { for (let t = 0; t <= 1; t += 0.25) { const k = at(sg[0][0] + (sg[1][0] - sg[0][0]) * t, sg[0][1] + (sg[1][1] - sg[0][1]) * t); (idx.get(k) || idx.set(k, []).get(k)).push(sg); } };
+      fenceSegs.forEach(addIdx);
+      const idxNear = (x, z, r) => { for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const sg of idx.get((Math.floor(x / G) + a) + "," + (Math.floor(z / G) + b)) || []) if (segDist2(x, z, sg[0], sg[1]) < r * r) return true; return false; };
+      const fenced = (x, z) => { for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const sg of idx.get((Math.floor(x / G) + a) + "," + (Math.floor(z / G) + b)) || []) if (segDist2(x, z, sg[0], sg[1]) < 6.25) return true; return false; };
+      const atCrossing = (x, z) => crossings.some((q) => Math.abs((x - q.x) * q.tx + (z - q.z) * q.tz) < 7 && Math.abs(-(x - q.x) * q.tz + (z - q.z) * q.tx) < q.w / 2 + 5);
+      const carCell = (r, c) => r >= 0 && c >= 0 && r < n && c < n && map.kind[r * n + c] === 3;
+      // 지도 칸 경계는 그린 연석과 1~2m 어긋난다. 큰길(막힌 차도) 연석선 근처의 조각만 그 연석선 위로 옮겨 세우고,
+      // 차가 다니는 작은 차도(폭 NO_SIDEWALK_BELOW~WIDE_ROAD, 걸을 수 있음) 입구는 막지 않는다
+      const wideSegs = [];
+      for (const rd of roads) if (rd.k === "car" && !rd.br && rd.w >= CONFIG.WIDE_ROAD) for (let i = 0; i + 1 < rd.pts.length; i++) wideSegs.push({ a: rd.pts[i], b: rd.pts[i + 1], hw: rd.w / 2 });
+      const curbSnap = (x, z) => {
+        let best = null;
+        for (const sg of wideSegs) {
+          const dx = sg.b[0] - sg.a[0], dz = sg.b[1] - sg.a[1], L2 = dx * dx + dz * dz || 1e-9;
+          const t = Math.max(0, Math.min(1, ((x - sg.a[0]) * dx + (z - sg.a[1]) * dz) / L2));
+          const px = sg.a[0] + dx * t, pz = sg.a[1] + dz * t, d = Math.hypot(x - px, z - pz);
+          if (Math.abs(d - sg.hw) < 1.8 && (!best || Math.abs(d - sg.hw) < best.e)) best = { e: Math.abs(d - sg.hw), px, pz, d, hw: sg.hw };
+        }
+        if (!best || best.d < 0.01) return null;
+        const k = (best.hw + 0.15) / best.d, sx = best.px + (x - best.px) * k, sz = best.pz + (z - best.pz) * k;
+        // 옮긴 거리가 1.5m 이하이고, 옮긴 자리 바깥쪽 1m가 걷는 칸일 때만 (교차로 한가운데에서 다른 큰길 연석선으로 붙지 않게)
+        const ox = (x - best.px) / best.d, oz = (z - best.pz) / best.d;
+        if (Math.hypot(sx - x, sz - z) > 1.5 || kindAt(sx + ox, sz + oz) !== 2 || onLaneRoad(sx + ox, sz + oz)) return null;
+        return [sx, sz];
+      };
+      for (const loop of traceLoops(carCell, n, cell)) {
+        const L = simplifyLoop(loop, 0.55);
+        for (let i = 0; i < L.length; i++) {
+          const p = L[i], q = L[(i + 1) % L.length], len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+          if (len < 0.3) continue;
+          const k = Math.max(1, Math.ceil(len / 2)), nx = (q[1] - p[1]) / len, nz = -(q[0] - p[0]) / len;
+          for (let j = 0; j < k; j++) {
+            const a = [p[0] + (q[0] - p[0]) * j / k, p[1] + (q[1] - p[1]) * j / k], b = [p[0] + (q[0] - p[0]) * (j + 1) / k, p[1] + (q[1] - p[1]) * (j + 1) / k];
+            const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
+            // 한쪽은 걷는 칸, 다른 쪽은 막힌 차도여야 한다 (법선 방향은 고리 방향에 따라 다르므로 양쪽을 본다)
+            const k1 = kindAt(mx + nx * 0.8, mz + nz * 0.8), k2 = kindAt(mx - nx * 0.8, mz - nz * 0.8);
+            if (!((k1 === 2 && k2 === 3) || (k1 === 3 && k2 === 2))) continue;
+            if (mx < EDGE_BAND + 2 || mz < EDGE_BAND + 2 || mx > size - EDGE_BAND - 2 || mz > size - EDGE_BAND - 2) continue;
+            if (atCrossing(mx, mz) || fenced(mx, mz) || onLaneRoad(mx, mz)) continue;
+            const sa = curbSnap(a[0], a[1]), sb = curbSnap(b[0], b[1]);
+            if (!sa || !sb || Math.hypot(sb[0] - sa[0], sb[1] - sa[1]) < 0.3 || Math.hypot(sb[0] - sa[0], sb[1] - sa[1]) > 3) continue;
+            if (fenced((sa[0] + sb[0]) / 2, (sa[1] + sb[1]) / 2) && fenceFill >= 0 && idxNear((sa[0] + sb[0]) / 2, (sa[1] + sb[1]) / 2, 0.6)) continue;
+            vquad(BFENCE, sa, sb, 0.02, FENCE_H, 0, Math.hypot(sb[0] - sa[0], sb[1] - sa[1]) / 2, ONE);
+            const sg = [sa, sb]; fenceSegs.push(sg); addIdx(sg); fenceFill++;
+          }
+        }
+      }
+    }
     group.add(toMesh(BFENCE, std(T.fence, { side: THREE.DoubleSide, alphaTest: 0.5, roughness: 0.6 }), true));
+    if (map.underpass) drawUnderpass(group, map.underpass, solids, renderer.capabilities.getMaxAnisotropy());
 
     // ---------- 신호등 ----------
     // 교차로마다 두 방향 묶음이 번갈아 통행한다. 차량 신호: 초록 → 노랑 → 빨강.
@@ -1163,13 +1359,6 @@ const SCENERY = (() => {
       addObstacle: (x, z, r) => obstacles.add(x - r, z - r, x + r, z + r, { x, z, r }),
     }) : null;
     if (props && props.coneModel) coneMesh.count = baseMesh.count = 0; // 코드로 그린 라바콘 대신 모델
-    // 주차된 차 (차량 모델을 불러왔을 때만). 골목에 세우면 그 골목은 일방통행이 된다
-    const parked = typeof PARKED !== "undefined" ? PARKED.place({
-      group, roads, green: sc.green, crossings, kindAt, onCarway, nearExit, hash, pointInPoly, quality: CONFIG.QUALITY, size,
-      blocked: (x, z, r) => hits(x, z, r),
-      addObstacle: (x, z, r) => obstacles.add(x - r, z - r, x + r, z + r, { x, z, r }),
-    }) : null;
-
     scene.add(group);
 
     // 원(플레이어)이 건물 벽이나 나무 기둥에 닿는지 검사한다
@@ -1195,12 +1384,30 @@ const SCENERY = (() => {
       lampMat.emissiveIntensity = Math.sin(now * 0.004) > 0 ? 1.8 : 0.15;
       updateSignals(now / 1000);
       if (treeLod && cam && treeLod.update(cam.x, cam.z)) renderer.shadowMap.needsUpdate = true;
-      if (parked && cam && parked.update(cam.x, cam.z)) renderer.shadowMap.needsUpdate = true;
     }
     // 가장자리 가림막 앞인지 (안내 문구를 띄울 때 쓴다)
     const nearEdge = (x, z) => x < EDGE_BAND + 1.2 || z < EDGE_BAND + 1.2 || x > size - EDGE_BAND - 1.2 || z > size - EDGE_BAND - 1.2;
 
-    return { group, hits, tick, nearEdge, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, trees: trees.length, treeModels: !!treeLod, parked: parked && parked.count, parkedAlleys: parked && parked.alleys, parkedSamples: parked && parked.samples, exits: exits.length, props: props && props.counts }, treeStats: () => (treeLod ? treeLod.stats() : null),
+    // 점검용: 걷는 칸과 막힌 차도 칸이 맞닿은 변 가운데, 2.5m 안에 울타리가 있는 변의 비율 (횡단보도 자리는 뺀다)
+    function fenceStats() {
+      const idx = new Map(), G = 10, at = (x, z) => Math.floor(x / G) + "," + Math.floor(z / G);
+      for (const sg of fenceSegs) for (let t = 0; t <= 1; t += 0.25) { const x = sg[0][0] + (sg[1][0] - sg[0][0]) * t, z = sg[0][1] + (sg[1][1] - sg[0][1]) * t, k = at(x, z); (idx.get(k) || idx.set(k, []).get(k)).push(sg); }
+      const near = (x, z) => { for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const sg of idx.get((Math.floor(x / G) + a) + "," + (Math.floor(z / G) + b)) || []) if (segDist2(x, z, sg[0], sg[1]) < 6.25) return true; return false; };
+      let edges = 0, covered = 0; const gaps = [];
+      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+        if (map.kind[r * n + c] !== 2) continue;
+        for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const rr = r + dr, cc = c + dc;
+          if (rr < 0 || cc < 0 || rr >= n || cc >= n || map.kind[rr * n + cc] !== 3) continue;
+          const x = (c + 0.5 + dc / 2) * cell, z = (r + 0.5 + dr / 2) * cell;
+          if (crossings.some((q) => Math.hypot(q.x - x, q.z - z) < q.w / 2 + 6)) continue;
+          edges++;
+          if (near(x, z)) covered++; else if (gaps.length < 400) gaps.push([Math.round(x), Math.round(z)]);
+        }
+      }
+      return { list: () => fenceSegs.map((q) => [q[0][0], q[0][1], q[1][0], q[1][1], q.rd || 0]), segs: fenceSegs.length, filled: fenceFill, edges, covered, pct: edges ? +(covered / edges * 100).toFixed(1) : 100, gaps };
+    }
+    return { group, hits, tick, nearEdge, fenceStats, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, trees: trees.length, treeModels: !!treeLod, exits: exits.length, props: props && props.counts }, treeStats: () => (treeLod ? treeLod.stats() : null),
       exits: exits.map(({ e, t0, t1 }) => { const [x, z] = e.along((t0 + t1) / 2); return { x, z, inward: e.inward, width: t1 - t0 }; }) };
   }
 

@@ -55,13 +55,33 @@ const TRAFFIC = (() => {
     const group = new THREE.Group();
 
     // ---------- 행인 길 ----------
-    const walkable = (x, z) => kindAt(x, z) === 2 && !scenery.hits(x, z, 0.35);
+    // 차가 다니는 차도(폭 NO_SIDEWALK_BELOW 이상, 지면) 노면. 행인은 이 위를 따라 걷지 않는다 (걸으면 뒤에 오는 차가 막혀 선다, 2026-10-20 측정)
+    const carSegs = new Map(), CS = 20;
+    for (const rd of roads) {
+      if (rd.k !== "car" || rd.br || rd.w < CONFIG.NO_SIDEWALK_BELOW) continue;
+      for (let i = 0; i + 1 < rd.pts.length; i++) {
+        const a = rd.pts[i], b = rd.pts[i + 1], hw = rd.w / 2, seg = { a, b, hw };
+        for (let cz = Math.floor((Math.min(a[1], b[1]) - hw) / CS); cz <= Math.floor((Math.max(a[1], b[1]) + hw) / CS); cz++)
+          for (let cx = Math.floor((Math.min(a[0], b[0]) - hw) / CS); cx <= Math.floor((Math.max(a[0], b[0]) + hw) / CS); cx++) {
+            const k = cx + "," + cz; (carSegs.get(k) || carSegs.set(k, []).get(k)).push(seg);
+          }
+      }
+    }
+    const onCarway = (x, z) => (carSegs.get(Math.floor(x / CS) + "," + Math.floor(z / CS)) || []).some(({ a, b, hw }) => {
+      const dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz;
+      const t = L2 > 0 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L2)) : 0;
+      return Math.hypot(a[0] + dx * t - x, a[1] + dz * t - z) < hw + 0.2;
+    });
+    const walkable = (x, z) => kindAt(x, z) === 2 && !scenery.hits(x, z, 0.35) && !onCarway(x, z);
     // 두 점 사이를 0.5m 간격으로 보고 걸어서 지나갈 수 있는지 (장애물은 몸 반폭보다 조금 좁게 본다)
-    const clearLine = (a, b) => {
+    // maxCar: 차도 노면 위를 지나는 길이(m)를 이 값까지만 허용한다 (Infinity면 보지 않는다)
+    const clearLine = (a, b, maxCar = Infinity) => {
       const n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.5);
+      let car = 0;
       for (let k = 1; k < n; k++) {
         const x = a.x + ((b.x - a.x) * k) / n, z = a.z + ((b.z - a.z) * k) / n;
         if (kindAt(x, z) !== 2 || scenery.hits(x, z, 0.25)) return false;
+        if (maxCar < Infinity && onCarway(x, z) && (car += Math.hypot(b.x - a.x, b.z - a.z) / n) > maxCar) return false;
       }
       return true;
     };
@@ -78,7 +98,7 @@ const TRAFFIC = (() => {
         const flush = () => {
           // 건너뛴 점 사이를 걷는 선이 막혀 있으면 그 자리에서 나눈다
           for (let i = 1; i < run.length; i++) {
-            if (Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z) > 2.5 && !clearLine(run[i - 1], run[i])) {
+            if (Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z) > 2.5 && !clearLine(run[i - 1], run[i], 0)) { // 건너뛴 사이가 차도 노면을 지나도 나눈다
               const rest = run.splice(i);
               flush();
               run = rest;
@@ -136,7 +156,8 @@ const TRAFFIC = (() => {
     const lanes = [];
     let pieceId = 0;
     for (const rd of roads) {
-      if (rd.k !== "car" || rd.w < 5) continue;
+      // 인도 없는 골목(폭 NO_SIDEWALK_BELOW 미만)은 행인이 길 가장자리를 걸어서 차를 다니게 하지 않는다 (차가 행인에 막혀 섰다)
+      if (rd.k !== "car" || rd.w < CONFIG.NO_SIDEWALK_BELOW) continue;
       const hw = rd.w / 2, wide = rd.w >= WIDE;
       const offs = [];
       if (wide) {
@@ -150,9 +171,8 @@ const TRAFFIC = (() => {
       }
       for (const piece of pieces) {
         const id = pieceId++, head = piece[0], tail = piece[piece.length - 1];
-        // 한쪽에 차를 세운 골목(rd.parked, js/parked.js)은 길 방향 한 차로만, 세운 차 반대편으로 달린다
-        const dirs = rd.parked ? [[piece, head, tail]] : [[piece, head, tail], [piece.slice().reverse(), tail, head]];
-        for (const [pts, from, to] of dirs) for (const o of rd.parked ? [-1.0] : offs) {
+        const dirs = [[piece, head, tail], [piece.slice().reverse(), tail, head]];
+        for (const [pts, from, to] of dirs) for (const o of offs) {
           const S = offsetSamples(pts, o, 3);
           if (S.length < 2) continue;
           for (const p of S) p.y = rd.br ? scenery.deckY(rd, p.x, p.z) : 0; // 다리·고가 위는 그 높이로 달린다
@@ -193,6 +213,7 @@ const TRAFFIC = (() => {
     const onRoad = (x, z, m) => (roadCells.get(Math.floor(x / RC) + "," + Math.floor(z / RC)) || []).some((s) => segDist(x, z, s.a, s.b) <= s.hw + m);
     // off: 차 가운데가 노면 밖(0.5m 여유), body: 차체 네 모서리 가운데 하나라도 노면 밖(연석을 넘음)
     const offRoad = { samples: 0, off: 0, body: 0, last: 0, byModel: {} }; // byModel: 연석을 넘은 표본을 차종별로
+    const pedBlock = { carFrames: 0, stopped: 0, byState: {} }; // 차가 서 있는 프레임 가운데 횡단보도 밖의 행인 때문에 선 프레임 (점검용)
     const joins = { n: 0, long: 0, noNext: 0 }; // 교차로에서 다음 차로로 넘어간 횟수, 그중 8m 넘게 건너뛴 횟수, 이어 갈 차로가 없어 사라진 횟수
 
     const lanePoints = makeIndex(20);
@@ -437,7 +458,7 @@ const TRAFFIC = (() => {
     }
     // 행인: 길 끝에서 15m 안의 다른 보행로(끝이든 중간이든)로 걸어가서 이어 간다. 이을 곳이 없을 때만 되돌아선다
     // (끝끼리만 8m 안에서 이으면 T자 교차로와 끊긴 보도에서 막혀 1분에 0.4~1.3번씩 되돌아섰다, 2026-10-19 측정)
-    function pedNextPath(pd, radius = 15) {
+    function pedNextPath(pd, radius = 15, maxCar = 0) {
       const end = pd.dir > 0 ? pd.path.pts[pd.path.pts.length - 1] : pd.path.pts[0];
       const here = { x: pd.x, z: pd.z };
       const hx = Math.sin(pd.yaw), hz = Math.cos(pd.yaw);
@@ -451,11 +472,13 @@ const TRAFFIC = (() => {
         let dir = Math.abs(cos) < 0.3 ? (Math.random() < 0.5 ? 1 : -1) : cos > 0 ? 1 : -1;
         if ((dir > 0 ? P.len - c.s : c.s) < 4) dir = -dir; // 그쪽으로 남은 길이 4m도 안 되면 반대쪽
         if ((dir > 0 ? P.len - c.s : c.s) < 4) continue; // 아주 짧은 조각은 건너뛴다
-        if (!clearLine(here, c)) continue;
+        if (!clearLine(here, c, maxCar)) continue;
         seen.add(c.pi);
         opts.push({ c, dir });
       }
-      if (!opts.length && radius < 25) return pedNextPath(pd, 25); // 가까이 없으면 조금 더 멀리 찾는다
+      if (!opts.length && radius < 25) return pedNextPath(pd, 25, maxCar); // 가까이 없으면 조금 더 멀리 찾는다
+      // 차도를 건너지 않고는 이을 곳이 없으면, 옆길 입구처럼 짧게(12m 이하) 건너는 곳까지 허용한다
+      if (!opts.length && maxCar === 0) return pedNextPath(pd, 15, 12);
       if (!opts.length) { pd.dir = -pd.dir; pedJumps.deadEnd++; return; }
       const o = pick(opts);
       linkTo(pd, pedPaths[o.c.pi], o.c.s, o.dir);
@@ -527,10 +550,11 @@ const TRAFFIC = (() => {
             turnTo(pd, Math.atan2(p.dx * pd.dir, p.dz * pd.dir), dt);
           }
         } else if (pd.state === "link") {
-          // 다음 길의 시작점까지 걸어간다
-          if (playerAhead) { /* 잠깐 기다린다 */ }
+          // 다음 길의 시작점까지 걸어간다. 옆길 입구처럼 차도를 건너야 하면, 가까이(35m) 차가 있을 때 연석 앞에서 기다린다 (건너는 데 8초쯤 걸린다)
+          const dx = pd.link.x - pd.x, dz = pd.link.z - pd.z, dl = Math.hypot(dx, dz) || 1;
+          const curb = !onCarway(pd.x, pd.z) && onCarway(pd.x + (dx / dl) * 0.8, pd.z + (dz / dl) * 0.8);
+          if (playerAhead || (curb && cars.some((c) => Math.hypot(c.x - pd.x, c.z - pd.z) < 35))) { /* 잠깐 기다린다 */ }
           else {
-            const dx = pd.link.x - pd.x, dz = pd.link.z - pd.z;
             if (dx * dx + dz * dz > 0.01) turnTo(pd, Math.atan2(dx, dz), dt);
             if (stepTo(pd, pd.link.x, pd.link.z, pd.speed * dt)) { pd.state = "walk"; pd.link = null; }
             moving = true;
@@ -598,15 +622,18 @@ const TRAFFIC = (() => {
       const check = (x, z, r, edge) => {
         const dx = x - car.x, dz = z - car.z, fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
         const ahead = dx * fx + dz * fz, side = Math.abs(-dx * fz + dz * fx);
-        if (!(ahead > 0 && ahead < 18 && side < car.halfW + r + 0.4)) return;
+        if (!(ahead > 0 && ahead < 18 && side < car.halfW + r + 0.4)) return false;
         // 인도 없는 골목 가장자리를 걷는 사람과 차체가 겹치지 않으면 서지 않고 천천히 옆을 지나간다
-        if (edge && side > car.halfW + 0.2) { if (ahead < 8) limit = Math.min(limit, 1.5); return; }
+        if (edge && side > car.halfW + 0.2) { if (ahead < 8) limit = Math.min(limit, 1.5); return false; }
         stopAt(ahead - car.halfL - r - 1.5);
+        return true;
       };
+      car.pedHold = false;
       if ((car.y || 0) < 2) { // 고가 위를 달리는 차는 아래의 사람 때문에 서지 않는다
         check(player.x, player.z, CONFIG.PLAYER_RADIUS);
         const alley = !ln.wide && ln.rd.w < CONFIG.NO_SIDEWALK_BELOW;
-        for (const p of peds) if (p.state !== "wait" && Math.abs(p.x - car.x) < 20 && Math.abs(p.z - car.z) < 20) check(p.x, p.z, 0.3, alley);
+        // 보도 위 행인은 보지 않는다 (굽은 길에서는 바깥 보도의 행인이 진행 방향 앞에 들어와 차가 섰다)
+        for (const p of peds) if (p.state !== "wait" && Math.abs(p.x - car.x) < 20 && Math.abs(p.z - car.z) < 20 && (alley || onCarway(p.x, p.z)) && check(p.x, p.z, 0.3, alley) && p.state !== "cross") car.pedHold = p.state;
       }
       return limit;
     }
@@ -640,6 +667,7 @@ const TRAFFIC = (() => {
         // 교차로를 도는 동안에는 천천히(6m/s 이하) 가되, 앞의 플레이어·행인·차는 똑같이 본다
         const target = car.trans ? Math.min(6, carTarget(car, t, player)) : carTarget(car, t, player);
         car.braking = target < car.v - 0.2;
+        if (car.v < 0.3) { pedBlock.carFrames++; if (car.pedHold && target < 0.5) { pedBlock.stopped++; pedBlock.byState[car.pedHold] = (pedBlock.byState[car.pedHold] || 0) + 1; } }
         car.v += Math.max(-7 * dt, Math.min(2.5 * dt, target - car.v));
         if (car.v < 0) car.v = 0;
         car.roll = (car.roll || 0) + car.v * dt; // 바퀴를 굴린 거리 (교차로 곡선에서도)
@@ -745,7 +773,7 @@ const TRAFFIC = (() => {
           offRoad.samples++;
           if (!onRoad(car.x, car.z, 0.5)) offRoad.off++;
           const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw), l = car.halfL * 0.9, w = car.halfW;
-          if ([[l, w], [l, -w], [-l, w], [-l, -w]].some(([a, s]) => !onRoad(car.x + fx * a - fz * s, car.z + fz * a + fx * s, 0))) { offRoad.body++; const mk = (car.model || car.type) + (car.lane.rd.parked ? "(일방)" : car.trans ? "(회전)" : ""); offRoad.byModel[mk] = (offRoad.byModel[mk] || 0) + 1; }
+          if ([[l, w], [l, -w], [-l, w], [-l, -w]].some(([a, s]) => !onRoad(car.x + fx * a - fz * s, car.z + fz * a + fx * s, 0))) { offRoad.body++; const mk = (car.model || car.type) + (car.trans ? "(회전)" : ""); offRoad.byModel[mk] = (offRoad.byModel[mk] || 0) + 1; }
         }
       }
       draw(dt);
@@ -778,7 +806,7 @@ const TRAFFIC = (() => {
           root: r ? [+r.position.x.toFixed(1), +r.position.z.toFixed(1), r.visible] : null, hipOff: hip ? +Math.hypot(hw.x - r.position.x, hw.z - r.position.z).toFixed(2) : null, clip: r && crowd.clipOf ? crowd.clipOf(p.slot) : null, child: r ? [+w.x.toFixed(1), +w.y.toFixed(2), +w.z.toFixed(1)] : null };
       }),
       stats: () => ({ peds: peds.length, cars: cars.length, pedPaths: pedPaths.length, pedPathLen: (() => { const l = pedPaths.map((p) => p.len).sort((a, b) => a - b); return [l[Math.floor(l.length * 0.25)], l[Math.floor(l.length * 0.5)], l[Math.floor(l.length * 0.75)]].map(Math.round); })(), lanes: lanes.length, crossings: scenery.crossings.length,
-        waiting: peds.filter((p) => p.state === "wait").length, crossing: peds.filter((p) => p.state === "cross").length, carsStopped: cars.filter((c) => c.v < 0.3).length,
+        waiting: peds.filter((p) => p.state === "wait").length, crossing: peds.filter((p) => p.state === "cross").length, carsStopped: cars.filter((c) => c.v < 0.3).length, pedStopBy: { ...pedBlock.byState }, pedStopPct: pedBlock.carFrames ? +(pedBlock.stopped / pedBlock.carFrames * 100).toFixed(1) : 0,
         offRoadPct: offRoad.samples ? +((offRoad.off / offRoad.samples) * 100).toFixed(1) : 0,
         bodyOffPct: offRoad.samples ? +((offRoad.body / offRoad.samples) * 100).toFixed(1) : 0, offRoadSamples: offRoad.samples, bodyOffByModel: { ...offRoad.byModel }, joins: joins.n, longJoins: joins.long, deadEnds: joins.noNext, pedJumps: { ...pedJumps } }), };
   }

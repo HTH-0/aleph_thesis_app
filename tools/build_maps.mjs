@@ -666,7 +666,7 @@ out geom;`;
     const e = nodeUse.get(keyOf(p)) || { n: 0, w: 0, p };
     e.n++; e.w = Math.max(e.w, rd.w); nodeUse.set(keyOf(p), e);
   }
-  const junctions = [...nodeUse.values()].filter((e) => e.n >= 2).map((e) => ({ x: e.p[0], z: e.p[1], r: e.w / 2 + 2.5 }));
+  const junctions = [...nodeUse.values()].filter((e) => e.n >= 2).map((e) => ({ x: e.p[0], z: e.p[1], r: e.w / 2 + 2.5, w: e.w }));
   const MAX_GAP = 220;
   const DUAL = 20; // 상하행이 따로 그려진 큰길(두 줄 차도)도 함께 열리도록, 횡단보도는 이 거리(m) 안의 나란한 차도까지 연다
   const wideRoads = roads.filter((rd) => rd.k === "car" && rd.w >= WIDE_ROAD && !rd.br);
@@ -805,7 +805,7 @@ out geom;`;
   for (const j of junctions) {
     if (hasPublic && nearPub(j.x, j.z, 35)) continue; // 실제 횡단보도가 있는 교차로는 그것을 쓴다
     const cells = cellsWhere(j.x, j.z, j.r, (px, pz) => Math.hypot(j.x - px, j.z - pz) < j.r);
-    if (cells.length) cands.push({ kind: "junction", p: [j.x, j.z], cells });
+    if (cells.length) cands.push({ kind: "junction", p: [j.x, j.z], cells, w: j.w });
   }
   for (const cp of crossings) {
     if (hasPublic && nearPub(cp[0], cp[1], 25)) continue;
@@ -867,6 +867,52 @@ out geom;`;
       for (const k of rest) { parent[k] = first; total[first] += total[k]; }
     }
   }
+  // 크게 돌아가는 작은 큰길 교차로: 공공 횡단보도가 없어도, 폭 DETOUR_MAX_W 미만(2~3차로) 큰길 교차로에서 건너편까지
+  // 걸어서 DETOUR_MIN m 이상이면서 직선의 DETOUR_RATIO배를 넘게 돌아가면 연다 (실제로도 이런 교차로는 표시 없이 건넌다).
+  // 이어져 있기만 하면 열지 않아서, 반월당 종로 교차로처럼 직선 60m를 1.4km 돌아가는 곳이 있었다 (2026-10-20 tools/check/detour.mjs)
+  let detourOpened = 0;
+  if (hasPublic) {
+    const DETOUR_MAX_W = 16, DETOUR_MIN = 150, DETOUR_RATIO = 6, LIMIT = Math.round(600 / CELL);
+    const open = (i) => area[i] && !building[i] && !carway[i];
+    const dist = new Int32Array(N * N), q = new Int32Array(N * N);
+    let stamp = new Int32Array(N * N), gen = 0;
+    const walkDist = (from, to) => {
+      gen++; let h = 0, t = 0; q[t++] = from; stamp[from] = gen; dist[from] = 0;
+      while (h < t) {
+        const cur = q[h++];
+        if (cur === to) return dist[cur] * CELL;
+        if (dist[cur] >= LIMIT) continue;
+        const r = Math.floor(cur / N), c = cur % N;
+        for (const ni of [r > 0 ? cur - N : -1, r < N - 1 ? cur + N : -1, c > 0 ? cur - 1 : -1, c < N - 1 ? cur + 1 : -1])
+          if (ni >= 0 && stamp[ni] !== gen && open(ni)) { stamp[ni] = gen; dist[ni] = dist[cur] + 1; q[t++] = ni; }
+      }
+      return Infinity;
+    };
+    for (const cd of cands) {
+      if (cd.kind !== "junction" || cd.w >= DETOUR_MAX_W || usedJunctions.includes(cd.p)) continue;
+      // 후보 칸에 맞닿은 걷는 칸 (건너편끼리 비교한다)
+      const edge = [];
+      for (const i of cd.cells) {
+        const r = Math.floor(i / N), c = i % N;
+        for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nr = r + dr, nc = c + dc, ni = nr * N + nc;
+          if (nr >= 0 && nc >= 0 && nr < N && nc < N && open(ni)) edge.push(ni);
+        }
+      }
+      if (edge.length < 2) continue;
+      // 서로 가장 먼 두 칸 쌍 몇 개로 본다
+      let worst = 0;
+      for (let k = 0; k < 3 && worst <= DETOUR_RATIO; k++) {
+        const a = edge[Math.floor((k * edge.length) / 3)];
+        const b = edge.reduce((m, e) => (Math.hypot((e % N) - (a % N), Math.floor(e / N) - Math.floor(a / N)) > Math.hypot((m % N) - (a % N), Math.floor(m / N) - Math.floor(a / N)) ? e : m), a);
+        const straight = Math.hypot((b % N) - (a % N), Math.floor(b / N) - Math.floor(a / N)) * CELL;
+        if (straight < 6) continue;
+        const w = walkDist(a, b);
+        if (w >= DETOUR_MIN && w > straight * DETOUR_RATIO) worst = w / straight;
+      }
+      if (worst > DETOUR_RATIO) { applyCand(cd); detourOpened++; }
+    }
+  }
   crossings.length = 0;
   crossings.push(...usedCrossings);
 
@@ -919,7 +965,7 @@ out geom;`;
     scenery: { buildings, roads, green, trees, crossings, crosswalks, junctionsOpen: usedJunctions, crosswalkSource: hasPublic ? "public" : "rule" },
     sources: {
       crosswalks: hasPublic ? PUBLIC_CROSSWALKS[region.city].source : "규칙(교차로·OSM·중간 횡단보도)",
-      crosswalkCounts: { public: crosswalks.length, publicOnWideRoads: crosswalks.filter((c) => c.wide).length, ruleJunctions: usedJunctions.length, ruleCrossings: usedCrossings.length },
+      crosswalkCounts: { public: crosswalks.length, publicOnWideRoads: crosswalks.filter((c) => c.wide).length, ruleJunctions: usedJunctions.length, ruleDetourJunctions: detourOpened, ruleCrossings: usedCrossings.length },
       roadWidth: hasPublic ? "OSM width 태그, 없으면 공공 횡단보도 길이로 잰 값, 둘 다 없으면 도로 종류별 추정" : "OSM width·lanes 태그, 없으면 도로 종류별 추정",
       roadWidthCounts: { carRoads: carRoads.length, measured: widthMeasured, sameName: widthByName },
       sidewalk: walkWidth ? PUBLIC_SIDEWALKS[region.city].source : "추정(큰길 4m, 그 밖의 길 2m)",
@@ -936,7 +982,7 @@ out geom;`;
     console.log(`[${region.id}] 건물 공공 ${bstat.gov}(같은 건물 ${bstat.matched}, 공공만 ${bstat.govOnly}, OSM 건물 안이라 뺌 ${bstat.govDropped}, 차도 위라 뺌 ${bstat.onRoad}) / OSM ${bstat.osm}(OSM만 ${bstat.osmOnly}, 층수 때문에 OSM으로 남김 ${bstat.osmKept})`);
     if (bstat.floorGap.length) console.log(`[${region.id}] 층수가 3층 넘게 다른 건물 ${bstat.floorGap.length}개:`, bstat.floorGap.slice(0, 8).map((f) => `${f.name || "(이름 없음)"} 공공 ${f.gov}층/OSM ${f.osm}층 (${f.x},${f.z})`).join(", "));
   }
-  console.log(`[${region.id}] 걷는 칸 ${bestSize}/${N * N}, 건물 ${buildings.length}(층수 기록 ${measured}), 도로 ${roads.length}, 횡단보도 공공 ${crosswalks.length}(큰길 ${crosswalks.filter((c) => c.wide).length}) + 규칙 교차로 ${usedJunctions.length} + 규칙 띠 ${usedCrossings.length}, 차도 폭 실측 ${widthMeasured}+같은 길 ${widthByName}/${carRoads.length}, 보도 폭 ${sidewalkMatched}, 가게 앞 ${frontage}칸, 랜드마크`, counts);
+  console.log(`[${region.id}] 걷는 칸 ${bestSize}/${N * N}, 건물 ${buildings.length}(층수 기록 ${measured}), 도로 ${roads.length}, 횡단보도 공공 ${crosswalks.length}(큰길 ${crosswalks.filter((c) => c.wide).length}) + 규칙 교차로 ${usedJunctions.length}(돌아가는 길 ${detourOpened}) + 규칙 띠 ${usedCrossings.length}, 차도 폭 실측 ${widthMeasured}+같은 길 ${widthByName}/${carRoads.length}, 보도 폭 ${sidewalkMatched}, 가게 앞 ${frontage}칸, 랜드마크`, counts);
 }
 
 const ids = process.argv.slice(2).find((a) => !a.startsWith("--"));

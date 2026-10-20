@@ -192,6 +192,7 @@ function showBriefing() {
   box.textContent = "";
   if (withSound) renderSoundChips(box, state.landmarks);
   drawBriefMap($("brief-map"), state.map, state.routes[state.round], state.landmarks);
+  $("legend-underpass").hidden = !state.map.underpass;
   show("screen-briefing");
 }
 
@@ -216,6 +217,17 @@ function drawBriefMap(canvas, map, route, landmarks) {
     b.p.forEach(([x, z], i) => (i ? ctx.lineTo(toPx(x), toPx(z)) : ctx.moveTo(toPx(x), toPx(z))));
     ctx.closePath();
     ctx.fill();
+  }
+  // 지하도 출구: 파란 네모와 출구 번호 (출구끼리 지하로 이어진다)
+  if (map.underpass) {
+    ctx.font = "bold 10px 'IBM Plex Sans KR', sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const e of map.underpass.exits) {
+      const x = toPx(e.x), z = toPx(e.z);
+      ctx.fillStyle = "#2f6fd0"; ctx.fillRect(x - 8, z - 8, 16, 16);
+      ctx.fillStyle = "#fff"; ctx.fillText(e.no, x, z + 0.5);
+    }
+    ctx.textAlign = "left";
   }
   ctx.font = "bold 15px 'IBM Plex Sans KR', sans-serif";
   ctx.textBaseline = "middle";

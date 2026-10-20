@@ -64,10 +64,65 @@ function runRound(spec, onComplete) {
     return !scenery.hits(x, z, rr) && !traffic.hits(x, z, rr);
   }
 
+  // 지하도 (js/world.js placeUnderpass): 입구로 밀고 들어가면 나갈 출구를 숫자 키로 고른다.
+  // 지하로 걷는 거리만큼 시간과 걸은 거리를 더하고, 고른 출구 앞에서 바깥을 보고 나온다
+  const up = map.underpass && map.underpass.exits.length > 1 ? map.underpass : null;
+  const upEl = document.getElementById("play-underpass"), fadeEl = document.getElementById("play-fade");
+  let upChoice = null, upBusy = false; // upChoice: { from, opts: [{ j, cost }] }
+  const DIR8 = ["북", "북동", "동", "남동", "남", "남서", "서", "북서"];
+  // 지도 좌표는 x가 동쪽, z가 남쪽이다
+  const dirName = (dx, dz) => DIR8[(Math.round(Math.atan2(dx, -dz) / (Math.PI / 4)) + 8) % 8];
+  function underpassAt(x, z) {
+    if (!up) return -1;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    return up.exits.findIndex((e) => {
+      const ax = x - e.mouth.x, az = z - e.mouth.z, along = ax * e.tx + az * e.tz, side = Math.abs(-ax * e.tz + az * e.tx);
+      return along > 0 && along < 1.2 && side < e.W / 2 && fx * -e.tx + fz * -e.tz > 0.5; // 입구 앞에서 안쪽을 보고 있다
+    });
+  }
+  function openUnderpass(i) {
+    const from = up.exits[i];
+    const opts = up.exits.map((e, j) => ({ j, cost: up.cost(i, j), e })).filter((o) => o.j !== i).sort((a, b) => Number(a.e.no) - Number(b.e.no)).slice(0, 9);
+    upChoice = { from: i, opts };
+    upEl.querySelector("[data-title]").textContent = `${up.station} ${from.no}번 출구로 내려왔습니다. 어느 출구로 나갈까요?`;
+    const ol = upEl.querySelector("[data-list]");
+    ol.textContent = "";
+    opts.forEach((o, k) => {
+      const li = document.createElement("li");
+      li.textContent = `${k + 1}  ·  ${o.e.no}번 출구  ·  ${dirName(o.e.x - from.x, o.e.z - from.z)}쪽 ${Math.round(Math.hypot(o.e.x - from.x, o.e.z - from.z))}m`;
+      ol.appendChild(li);
+    });
+    upEl.hidden = false;
+  }
+  function closeUnderpass(back) {
+    if (back && upChoice) { const e = up.exits[upChoice.from]; camera.position.x = e.mouth.x + e.tx * 1.4; camera.position.z = e.mouth.z + e.tz * 1.4; }
+    upChoice = null;
+    upEl.hidden = true;
+  }
+  function takeUnderpass(i, j) {
+    const cost = up.cost(i, j), e = up.exits[j];
+    closeUnderpass(false);
+    upBusy = true;
+    startTime -= (cost / CONFIG.MOVE_SPEED) * 1000; // 지하로 걷는 시간
+    distance += cost;
+    fadeEl.querySelector("[data-text]").textContent = `${e.no}번 출구로 걷는 중 (지하 ${cost}m)`;
+    fadeEl.hidden = false;
+    setTimeout(() => {
+      if (finished) return;
+      camera.position.x = e.spawn.x; camera.position.z = e.spawn.z; yaw = e.spawn.yaw; pitch = 0;
+      setTimeout(() => { fadeEl.hidden = true; upBusy = false; }, 350);
+    }, 900);
+  }
+
   const keys = {};
   const onKeyDown = (e) => {
     keys[e.code] = true;
     if (TEST_MODE && e.code === "KeyP" && started && !finished) finish("arrived");
+    if (upChoice && !paused) {
+      const k = /^(Digit|Numpad)([1-9])$/.exec(e.code);
+      if (k && upChoice.opts[k[2] - 1]) takeUnderpass(upChoice.from, upChoice.opts[k[2] - 1].j);
+      else if (e.code === "KeyQ") closeUnderpass(true);
+    }
   };
   const onKeyUp = (e) => { keys[e.code] = false; };
   const onMouseMove = (e) => {
@@ -137,6 +192,13 @@ function runRound(spec, onComplete) {
       exits: scenery.exits,
       traffic: () => traffic.stats(),
       scenery: () => scenery.stats,
+      fence: () => scenery.fenceStats(),
+      fenceList: () => scenery.fenceStats().list(),
+      underpass: () => (up ? up.exits.map((e) => ({ no: e.no, x: e.x, z: e.z, tx: e.tx, tz: e.tz, mouth: e.mouth, spawn: e.spawn })) : null),
+      underpassOpen: () => (upChoice ? { from: upChoice.from, opts: upChoice.opts.map((o) => o.j), text: upEl.innerText } : null),
+      elapsed: () => (started ? (performance.now() - startTime) / 1000 : 0),
+      walked: () => distance,
+      cam: () => camera,
       trees: () => scenery.treeStats(),
       peds: () => traffic.pedList(),
       cars: () => traffic.carList(),
@@ -197,6 +259,8 @@ function runRound(spec, onComplete) {
     overlayEl.classList.add("hidden");
     clearTimeout(toastTimer);
     if (toastEl) toastEl.hidden = true;
+    if (upEl) upEl.hidden = true;
+    if (fadeEl) fadeEl.hidden = true;
     scene.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
       for (const mt of [].concat(o.material || [])) { if (mt.userData && mt.userData.ownMap && mt.map) mt.map.dispose(); mt.dispose(); } // 행인 모델은 재질이 여러 개다
@@ -241,7 +305,8 @@ function runRound(spec, onComplete) {
       if (keys.ArrowLeft) yaw += 1.8 * dt;
       if (keys.ArrowRight) yaw -= 1.8 * dt;
       const len = Math.hypot(dx, dz);
-      if (len > 0) {
+      if (upChoice || upBusy) { /* 지하도에서 출구를 고르는 중에는 움직이지 않는다 */ }
+      else if (len > 0) {
         dx = (dx / len) * speed * dt;
         dz = (dz / len) * speed * dt;
         const cx = camera.position.x, cz = camera.position.z;
@@ -253,6 +318,7 @@ function runRound(spec, onComplete) {
         if (Math.hypot(nx - cx, nz - cz) < Math.hypot(dx, dz) * 0.3 && scenery.nearEdge(cx, cz)) showToast();
         camera.position.x = nx;
         camera.position.z = nz;
+        if (keys.KeyW || keys.ArrowUp) { const i = underpassAt(nx, nz); if (i >= 0) openUnderpass(i); }
       }
       if (withSound) soundscape.updateListener(camera);
 

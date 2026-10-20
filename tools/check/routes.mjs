@@ -6,7 +6,7 @@ import vm from "node:vm";
 import { ROOT } from "./browser.mjs";
 
 const seeds = Number(process.argv[2]) || 10;
-const ctx = { console, Math, Uint8Array, Int32Array, Array, Error, JSON, encodeURIComponent, Number, Set };
+const ctx = { console, Math, Uint8Array, Int32Array, Array, Error, JSON, encodeURIComponent, Number, Set, Map };
 ctx.fetch = async (url) => ({ ok: true, json: async () => JSON.parse(readFileSync(join(ROOT, url), "utf8")) });
 vm.createContext(ctx);
 for (const f of ["js/config.js", "js/world.js"]) vm.runInContext(readFileSync(join(ROOT, f), "utf8").replace(/^const /gm, "var "), ctx);
