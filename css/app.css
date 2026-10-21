@@ -80,10 +80,10 @@ body { background: var(--color-bg); color: var(--color-text); font-family: var(-
   .brief-grid { grid-template-columns: 1fr; }
 }
 /* 지하도: 출구 고르기와 이동 중 화면 (js/game.js) */
-.underpass { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100% - 32px)); padding: 18px 20px; background: rgba(20,22,26,0.9); color: #f4f1ea; border-left: 4px solid #2f6fd0; }
-.underpass[hidden] { display: none; }
-.underpass p { margin: 0 0 10px; font-size: 16px; }
-.underpass ol { list-style: none; margin: 0 0 10px; padding: 0; font-size: 15px; line-height: 1.9; font-variant-numeric: tabular-nums; }
-.underpass .small { color: #b9b6ae; font-size: 13px; margin: 0; }
+.underpass-panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100% - 32px)); padding: 18px 20px; background: rgba(20,22,26,0.9); color: #f4f1ea; border-left: 4px solid #2f6fd0; }
+.underpass-panel[hidden] { display: none; }
+.underpass-panel p { margin: 0 0 10px; font-size: 16px; }
+.underpass-panel ol { list-style: none; margin: 0 0 10px; padding: 0; font-size: 15px; line-height: 1.9; font-variant-numeric: tabular-nums; }
+.underpass-panel .small { color: #b9b6ae; font-size: 13px; margin: 0; }
 .play-fade { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #0d0f12; color: #e9e6df; font-size: 17px; }
 .play-fade[hidden] { display: none; }
