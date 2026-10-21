@@ -34,6 +34,7 @@ Chrome을 못 찾으면 `CHROME_PATH` 환경 변수로 위치를 알려 준다.
 | `node tools/check/play.mjs` | 지역마다 테스트 모드(`?test=1`)로 두 판을 진행해서 결과 화면까지 가는지 검사한다. 판마다 fps, 행인·차량 수를 찍는다 |
 | `node tools/check/play.mjs seomun,banwoldang` | 고른 지역만 검사한다 |
 | `node tools/check/traffic.mjs` | 지역마다 출발점과 횡단보도 세 곳에서 차를 지켜보고, 차가 차도 노면 밖에 있던 비율, 교차로 통과·건너뜀, 막다른 길에서 사라진 횟수, 그리기 호출·삼각형 수를 찍는다 |
+| `node tools/check/ground.mjs [태그] [지역,…]` | 큰길 횡단보도 앞 보도(점자블록·연석), 골목 두 곳, 위에서 본 거리를 찍는다 → `out/ground-<태그>-<지역>-<장면>.png` |
 | `node tools/check/hitch.mjs` | 출발 버튼부터 판 화면 준비까지 걸린 시간, 걷는 동안 70ms 넘게 멈춘 프레임 수, 판 도중 새로 만든 셰이더 수(0이어야 한다, `js/game.js` `warmUp`)를 찍는다. 새 셰이더가 있으면 종료 코드 1 |
 | `node tools/check/pedjump.mjs` | 같은 자리에서 행인이 한 프레임에 걷는 속도보다 크게 옮겨진 횟수(순간이동)를 센다. 0이 아니면 종료 코드 1 |
 | `node tools/check/peds.mjs seomun [사람 번호 0~5]` | 행인 모델을 가까이에서 찍는다: 같은 사람의 원본 옷과 바꾼 옷, 신호를 기다리는 사람 |

@@ -30,7 +30,7 @@ const SCENERY = (() => {
   // ---------- 사진 텍스처 (Poly Haven CC0, assets/textures, tools/fetch_textures.mjs) ----------
   // 사진의 밝기 무늬만 쓴다: 평균 밝기를 1로 맞춘 비율을 바탕색에 곱하고, 색은 지금처럼 건물·길마다 꼭짓점 색으로 곱한다.
   // 못 불러오면 코드로 그린 무늬를 쓴다.
-  const PHOTO_IDS = ["asphalt_02", "square_concrete_pavers", "red_brick_03", "white_plaster_02", "concrete_wall_003", "rectangular_facade_tiles"];
+  const PHOTO_IDS = ["asphalt_02", "square_concrete_pavers", "red_brick_03", "white_plaster_02", "concrete_wall_003", "rectangular_facade_tiles", "concrete_tiles_02", "granite_tile_04"];
   const PHOTO = {};
   let photoLoad = null;
   function load() {
@@ -61,6 +61,9 @@ const SCENERY = (() => {
     g.putImageData(d, 0, 0);
     return true;
   }
+  // 간판 업종 이름 (상호 없이)
+  const SHOP_WORDS = ["약국", "편의점", "분식", "미용실", "치킨", "부동산", "세탁소", "안경", "카페", "한식", "휴대폰", "마트", "정육점", "꽃집", "베이커리", "김밥", "노래방", "학원", "의원", "커피", "반찬", "철물점", "문구", "떡집"];
+  const VERT_WORDS = ["학원", "치과", "내과", "한의원", "노래방", "PC방", "당구장", "헬스", "피아노", "수학", "영어", "필라테스", "모텔", "사우나", "태권도", "미술"];
   const SIGN_COLORS = ["#d8342c", "#1f5fbf", "#f2c230", "#2e8b57", "#f07f1f", "#f4f1ea", "#7a2f8f", "#14324f"];
 
   function textures(renderer) {
@@ -105,21 +108,66 @@ const SCENERY = (() => {
         for (let i = 0; i <= 4; i++) { g.fillRect(i * 64 - 2, 0, 4, h); g.fillRect(0, i * 64 - 2, w, 4); }
         for (let i = 0; i < 16; i++) if (hash(i * 5.1) < 0.3) { g.fillStyle = "rgba(255,255,255,0.12)"; g.fillRect((i % 4) * 64 + 2, Math.floor(i / 4) * 64 + 2, 60, 60); }
       }, a),
-      // 1층 상가: 위쪽 간판 띠와 아래쪽 유리 진열창. 가로 4칸(칸당 4m), 높이 4.2m
-      shop: canvasTex(512, 256, (g, w, h) => {
+      // 1층 상가: 위쪽 간판 띠와 아래쪽 유리 진열창. 가로 8칸(칸당 4m), 높이 4.2m.
+      // 간판에는 업종 이름만 쓴다(실제 상호는 쓰지 않는다, 2026-10-21 사용자 결정)
+      shop: canvasTex(1024, 256, (g, w, h) => {
         g.fillStyle = "#3b3f44"; g.fillRect(0, 0, w, h);
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < 8; i++) {
           const x = i * 128, c = SIGN_COLORS[Math.floor(hash(i * 3.7 + 1) * SIGN_COLORS.length)];
           g.fillStyle = c; g.fillRect(x + 2, 8, 124, 58);
+          g.fillStyle = "rgba(0,0,0,0.18)"; g.fillRect(x + 2, 60, 124, 6);
           g.fillStyle = c === "#f4f1ea" || c === "#f2c230" ? "#1b1b1b" : "#fbfaf6";
-          const n = 3 + Math.floor(hash(i * 9.1) * 4);
-          for (let k = 0; k < n; k++) g.fillRect(x + 14 + k * (100 / n), 24, 100 / n - 6, 26);
+          const word = SHOP_WORDS[Math.floor(hash(i * 9.1 + 2) * SHOP_WORDS.length)];
+          g.font = `bold ${word.length > 3 ? 30 : 38}px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif`;
+          // 건물 벽은 바깥에서 볼 때 텍스처 가로 방향이 오른쪽에서 왼쪽이라 글자를 좌우로 뒤집어 그린다
+          g.save(); g.translate(x + 64, 37); g.scale(-1, 1);
+          g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(word, 0, 0, 116);
+          g.restore();
           const grd = g.createLinearGradient(0, 80, 0, 250);
           grd.addColorStop(0, "#7e95a6"); grd.addColorStop(1, "#24313c");
           g.fillStyle = grd; g.fillRect(x + 8, 80, 112, 170);
           g.fillStyle = "rgba(255,240,210,0.35)"; g.fillRect(x + 14, 160, 100, 90);
           g.fillStyle = "#8f9398"; g.fillRect(x + 62, 80, 4, 170);
         }
+      }, a),
+      // 빌라(다세대 주택): 벽돌 벽에 층마다 넓은 창(확장 발코니)과 낮은 난간, 창 아래 실외기, 층 사이 콘크리트 띠.
+      // 가로 4칸(칸당 3.2m) × 세로 4층. 벽 색은 건물마다 꼭짓점 색(VILLA_TINTS)으로 곱한다
+      villa: canvasTex(512, 512, (g, w, h) => {
+        if (!photoFill(g, w, h, "red_brick_03", 13, [236, 230, 224], 0.7)) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h); noise(g, w, h, 14, 13); }
+        for (let fy = 0; fy < 4; fy++) {
+          const y = fy * 128;
+          g.fillStyle = "#e4e0d8"; g.fillRect(0, y + 116, w, 12); // 층 사이 콘크리트 띠
+          for (let fx = 0; fx < 4; fx++) {
+            const x = fx * 128, wide = hash(fx * 5 + fy * 3 + 1) < 0.65;
+            if (wide) {
+              g.fillStyle = "#cfd2d4"; g.fillRect(x + 8, y + 22, 112, 82); // 알루미늄 창틀
+              const grd = g.createLinearGradient(0, y + 26, 0, y + 100);
+              grd.addColorStop(0, "#6f8494"); grd.addColorStop(1, "#2f3a44");
+              g.fillStyle = grd; g.fillRect(x + 12, y + 26, 104, 74);
+              g.fillStyle = "#cfd2d4"; g.fillRect(x + 42, y + 26, 3, 74); g.fillRect(x + 83, y + 26, 3, 74);
+              if (hash(fx * 11 + fy * 7) < 0.3) { g.fillStyle = "rgba(238,232,220,0.85)"; g.fillRect(x + 46, y + 30, 36, 66); } // 커튼
+              g.fillStyle = "#3f4447"; g.fillRect(x + 8, y + 74, 112, 3); // 난간 손잡이
+              for (let k = 0; k < 12; k++) g.fillRect(x + 12 + k * 9, y + 77, 2, 27);
+            } else {
+              g.fillStyle = "#d8d6d0"; g.fillRect(x + 34, y + 34, 60, 52);
+              g.fillStyle = "#3a4650"; g.fillRect(x + 38, y + 38, 52, 44);
+              g.fillStyle = "rgba(50,50,50,0.9)"; for (let k = 0; k < 5; k++) g.fillRect(x + 42 + k * 10, y + 38, 2, 44); // 방범창
+            }
+            if (hash(fx * 13 + fy * 17 + 5) < 0.35) { // 창 아래 실외기
+              g.fillStyle = "#e9e9e4"; g.fillRect(x + 76, y + 104, 34, 14);
+              g.fillStyle = "#9a9d9f"; g.beginPath(); g.arc(x + 88, y + 111, 5, 0, Math.PI * 2); g.fill();
+            }
+          }
+        }
+      }, a),
+      // 필로티 주차장: 1층을 비우고 기둥만 세운 빌라 아래 (어두운 안쪽, 칸당 3.2m에 기둥 하나, 천장 띠)
+      piloti: canvasTex(256, 128, (g, w, h) => {
+        const grd = g.createLinearGradient(0, 0, 0, h);
+        grd.addColorStop(0, "#1f2225"); grd.addColorStop(1, "#3a3d40");
+        g.fillStyle = grd; g.fillRect(0, 0, w, h);
+        g.fillStyle = "#cfcbc3"; g.fillRect(0, 0, w, 14); // 천장 보
+        for (let x = 0; x < w; x += 64) { g.fillStyle = "#c4c0b8"; g.fillRect(x, 0, 12, h); g.fillStyle = "rgba(0,0,0,0.25)"; g.fillRect(x + 12, 14, 4, h - 14); }
+        g.fillStyle = "#f2c230"; for (let x = 0; x < w; x += 64) g.fillRect(x, h - 22, 12, 6); // 기둥 아래 노란 보호대
       }, a),
       // 붉은 벽돌 벽 (80~90년대 다세대 주택): 창문 배치는 punched와 같다 (가로 4칸 × 세로 4층)
       brick: canvasTex(512, 512, (g, w, h) => {
@@ -195,8 +243,9 @@ const SCENERY = (() => {
         if (!photoFill(g, w, h, "concrete_wall_003", 1, [245, 245, 245], 0.6)) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h); noise(g, w, h, 26, 3); }
         g.fillStyle = "rgba(0,0,0,0.08)"; for (let i = 0; i < 8; i++) g.fillRect(i * 32, 0, 2, h);
       }, a),
-      // 보도블록: 바닥 텍스처 한 장이 4m라 사진(1.8m)을 2×2장 넣는다
-      paving: PHOTO.square_concrete_pavers ? canvasTex(512, 512, (g, w, h) => photoFill(g, w, h, "square_concrete_pavers", 2, [170, 160, 148], 0.8), a) : canvasTex(256, 256, (g, w, h) => {
+      // 보도블록: 한국 보도에 흔한 회색 직사각 블록을 엇갈려 깐 모습(2026-10-21, 예전에는 정사각 콘크리트 판).
+      // 바닥 텍스처 한 장이 4m라 사진(1.8m)을 2×2장 넣는다
+      paving: PHOTO.concrete_tiles_02 ? canvasTex(512, 512, (g, w, h) => photoFill(g, w, h, "concrete_tiles_02", 2, [178, 176, 171], 0.9), a) : canvasTex(256, 256, (g, w, h) => {
         g.fillStyle = "#a99f92"; g.fillRect(0, 0, w, h);
         for (let r = 0; r < 20; r++) for (let c = 0; c < 10; c++) {
           const v = hash(r * 31 + c * 7) * 14 - 7;
@@ -205,7 +254,8 @@ const SCENERY = (() => {
         }
         noise(g, w, h, 10, 4);
       }, a),
-      plaza: PHOTO.square_concrete_pavers ? canvasTex(512, 512, (g, w, h) => photoFill(g, w, h, "square_concrete_pavers", 2, [205, 198, 187], 0.7), a) : canvasTex(256, 256, (g, w, h) => {
+      // 광장: 큰 화강석 판 (사진 2m를 2×2장, 한 장 4m)
+      plaza: PHOTO.granite_tile_04 ? canvasTex(512, 512, (g, w, h) => photoFill(g, w, h, "granite_tile_04", 2, [196, 192, 185], 0.8), a) : canvasTex(256, 256, (g, w, h) => {
         g.fillStyle = "#cfc8bd"; g.fillRect(0, 0, w, h);
         for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
           const v = hash(r * 17 + c * 3) * 16 - 8;
@@ -257,6 +307,41 @@ const SCENERY = (() => {
         }, a);
         return t;
       })(),
+      // 화강석 연석: 사진 한 장(2m)을 띠 길이 방향으로 쓴다
+      curb: canvasTex(256, 256, (g, w, h) => { if (!photoFill(g, w, h, "granite_tile_04", 1, [186, 184, 180], 0.7)) { g.fillStyle = "#bab8b4"; g.fillRect(0, 0, w, h); noise(g, w, h, 18, 11); } }, a),
+      // 노란 점자블록: 한 장 0.3m. 선형(걷는 방향으로 긴 돌기 4줄)과 점형(5×5 돌기)
+      tactLine: canvasTex(64, 64, (g, w, h) => {
+        g.fillStyle = "#d9ae17"; g.fillRect(0, 0, w, h);
+        for (let i = 0; i < 4; i++) { const x = 5 + i * 15; g.fillStyle = "#b8900f"; g.fillRect(x + 6, 4, 2, h - 8); g.fillStyle = "#f2cb2c"; g.fillRect(x, 4, 6, h - 8); }
+        g.fillStyle = "rgba(0,0,0,0.25)"; g.fillRect(0, 0, w, 1); g.fillRect(0, 0, 1, h);
+        noise(g, w, h, 14, 21);
+      }, a),
+      tactDot: canvasTex(64, 64, (g, w, h) => {
+        g.fillStyle = "#d9ae17"; g.fillRect(0, 0, w, h);
+        for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+          const x = 7 + c * 12.5, y = 7 + r * 12.5;
+          g.fillStyle = "#b8900f"; g.beginPath(); g.arc(x + 1, y + 1, 4, 0, Math.PI * 2); g.fill();
+          g.fillStyle = "#f4d03a"; g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill();
+        }
+        g.fillStyle = "rgba(0,0,0,0.25)"; g.fillRect(0, 0, w, 1); g.fillRect(0, 0, 1, h);
+        noise(g, w, h, 14, 23);
+      }, a),
+      // 보행자 우선도로 색 포장: 0.5m 네모를 색을 바꿔 가며 깐다 (한 장 2m)
+      stamp: canvasTex(256, 256, (g, w, h) => {
+        const cols = ["#b06a52", "#c9a882", "#9a948c", "#d6c7a8", "#a55a44", "#bdb2a2"];
+        for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { g.fillStyle = cols[Math.floor(hash(r * 7 + c * 13 + 3) * cols.length)]; g.fillRect(c * 64, r * 64, 64, 64); }
+        g.fillStyle = "rgba(60,55,50,0.55)"; for (let i = 0; i <= 4; i++) { g.fillRect(i * 64 - 1, 0, 2, h); g.fillRect(0, i * 64 - 1, w, 2); }
+        noise(g, w, h, 18, 25);
+      }, a),
+      // 가로수 보호판: 1.2m 철판, 가운데 둥근 흙 구멍과 바퀴살 모양 틈
+      grate: canvasTex(128, 128, (g, w, h) => {
+        g.fillStyle = "#6a6e72"; g.fillRect(0, 0, w, h);
+        g.strokeStyle = "#383b3e"; g.lineWidth = 3;
+        for (let k = 0; k < 24; k++) { const t = (k / 24) * Math.PI * 2; g.beginPath(); g.moveTo(64 + Math.cos(t) * 26, 64 + Math.sin(t) * 26); g.lineTo(64 + Math.cos(t) * 58, 64 + Math.sin(t) * 58); g.stroke(); }
+        g.strokeStyle = "#8a8e92"; g.lineWidth = 3; g.strokeRect(2, 2, w - 4, h - 4);
+        g.fillStyle = "#3b2f25"; g.beginPath(); g.arc(64, 64, 22, 0, Math.PI * 2); g.fill();
+        noise(g, w, h, 12, 27);
+      }, a),
       // 라바콘: 주황 몸통에 흰 반사띠 두 줄 (위가 캔버스 위쪽)
       cone: canvasTex(16, 128, (g, w, h) => {
         g.fillStyle = "#f2611d"; g.fillRect(0, 0, w, h);
@@ -287,6 +372,14 @@ const SCENERY = (() => {
     const cross = (b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]);
     if (cross < 0) { const t = b; b = c; c = t; }
     for (const q of [a, b, c]) vtx(B, q[0], y, q[1], 0, 1, 0, q[0] / s, -q[1] / s, col);
+  }
+  // 위를 향한 네모 (q: [[x, z, u, v] × 4]). 삼각형마다 위에서 볼 때 앞면이 되게 순서를 맞춘다 (DoubleSide 재질도 뒷면이면 빛을 거꾸로 받는다)
+  function upQuad(B, q, y, col) {
+    for (const [i, j, k] of [[0, 1, 2], [0, 2, 3]]) {
+      let a = q[i], b = q[j], c = q[k];
+      if ((b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]) < 0) { const t = b; b = c; c = t; }
+      for (const p of [a, b, c]) vtx(B, p[0], y, p[1], 0, 1, 0, p[2], p[3], col);
+    }
   }
   function quadUp(B, a, b, c, d, y, s, col) { triUp(B, a, b, c, y, s, col); triUp(B, a, c, d, y, s, col); }
   function polyUp(B, pts, y, s, col) {
@@ -508,6 +601,8 @@ const SCENERY = (() => {
   const APT_TINTS = ["#f1efe9", "#ece8de", "#e4e6e6", "#efe9dc", "#e6e1d5"];
   const METAL_TINTS = ["#c9d1d6", "#b7c4cc", "#d8d8d2", "#9fb2bf"];
   const TILE_TINTS = ["#4f565e", "#5a5f66", "#3f4f5e", "#6b4a3f", "#566b77"]; // 기와·슬레이트 지붕
+  // 빌라 벽 색: 붉은 벽돌, 황토색 벽돌, 밝은 베이지, 회갈색 (사진 벽돌 무늬에 곱한다)
+  const VILLA_TINTS = ["#c98c6c", "#b9765a", "#d7b08a", "#e3d6c2", "#c8b8a2", "#d9c3a5"];
   const HOUSE_TINTS = ["#ece4d4", "#e2d8c4", "#f0ebe1", "#d9cdb8"];
   // 지은 해에 따라 벽 색을 바래게 한다 (오래될수록 어둡고 누렇게)
   const aged = (col, year) => {
@@ -555,6 +650,8 @@ const SCENERY = (() => {
     // 건물
     const BP = buf(), BR = buf(), BG = buf(), BS = buf(), BROOF = buf();
     const BBRICK = buf(), BBLOCK = buf(), BMETAL = buf(), BAPT = buf(), BTILE = buf(), BLABEL = buf(), BPLAIN = buf();
+    const BVILLA = buf(), BPIL = buf(), BVSIGN = buf(); // 빌라 벽, 필로티 주차장, 세로 간판 (2026-10-21)
+    const roofSpots = [], vsigns = [], roofStats = {}; // 옥상 물탱크·실외기 자리, 세로 간판 자리
     const solids = makeIndex(12); // 충돌용 건물 다각형
     const polys = [];
     const labels = []; // 아파트 동 번호 { b, pts, h }
@@ -604,12 +701,29 @@ const SCENERY = (() => {
           const [target, wallTint] = b.st === "b" && !isChurch ? [BBRICK, pick(BRICK_WALL)]
             : b.st === "k" ? [BBLOCK, tint]
             : [r < (b.y >= 2005 ? 0.25 : 0.5) || isChurch || isLow ? BP : BR, tint];
+          // 빌라(다세대 주택): 가게 없는 2~5층 주거 건물. 2002년 뒤(연도를 모르면 절반) 4층 이상은 1층이 필로티 주차장
+          const villa = !hasShop && !isChurch && !isLow && h >= 6 && h <= 17.5 && b.st !== "k";
+          // 상가주택: 가게 있는 낮은 건물의 위층도 절반은 빌라 벽
+          const villaTop = hasShop && h <= 14 && hash(i * 2.3) < 0.5 && b.st !== "k";
+          const vTint = b.st === "b" || (b.y && b.y < 1992) ? pick(BRICK_WALL) : pick(VILLA_TINTS);
           if (hasShop) {
-            addWalls(BS, pts, 0, SHOP_H, ONE, 4, 4, SHOP_H, 1, i, 0.78);
-            addWalls(target, pts, SHOP_H, h, wallTint, BAY, 4, FLOOR, 4, i, 0.94);
+            addWalls(BS, pts, 0, SHOP_H, ONE, 4, 8, SHOP_H, 1, i, 0.78);
+            addWalls(villaTop ? BVILLA : target, pts, SHOP_H, h, villaTop ? vTint : wallTint, BAY, 4, FLOOR, 4, i, 0.94);
+            // 세로 간판: 3층 넘는 상가 건물의 가장 긴 벽 한쪽 끝 (2층부터 위로)
+            if (h >= 10) {
+              let best = null;
+              for (let j = 0; j < pts.length; j++) { const p0 = pts[j], p1 = pts[(j + 1) % pts.length], len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]); if (!best || len > best.len) best = { p0, p1, len }; }
+              if (best.len >= 6) vsigns.push({ ...best, y0: SHOP_H + 0.6, y1: Math.min(h - 0.6, SHOP_H + 0.6 + 6.5), k: i });
+            }
+          } else if (villa) {
+            const pil = h >= 12 && (b.y ? b.y >= 2002 : hash(i * 4.1) < 0.5);
+            if (pil) addWalls(BPIL, pts, 0, 2.7, ONE, BAY, 4, 2.7, 1, i, 1);
+            addWalls(BVILLA, pts, pil ? 2.7 : 0, h, vTint, BAY, 4, FLOOR, 4, i, pil ? 0.9 : 0.78);
           } else {
             addWalls(target, pts, 0, h, wallTint, BAY, 4, FLOOR, 4, i, 0.74);
           }
+          // 옥상 물탱크·실외기 (평지붕 30m 이하, 넓이 40㎡ 넘는 건물)
+          if (h <= 30 && area > 40) roofSpots.push({ pts, h, i, minx, maxx, minz, maxz });
         }
       }
       // 지붕: 한국 옥상에서 흔한 초록 방수 페인트를 일부 섞는다
@@ -663,7 +777,7 @@ const SCENERY = (() => {
       const tint = lin(WALL_TINTS[Math.floor(hash(k) * WALL_TINTS.length)]);
       const edgeOpen = !blocked(r0 - 1, c0) || !blocked(r0 + LOT, c0) || !blocked(r0, c0 - 1) || !blocked(r0, c0 + LOT);
       if (edgeOpen && floors >= 3) {
-        addWalls(BS, pts, 0, SHOP_H, ONE, 4, 4, SHOP_H, 1, k, 0.78);
+        addWalls(BS, pts, 0, SHOP_H, ONE, 4, 8, SHOP_H, 1, k, 0.78);
         addWalls(hash(k * 3) < 0.5 ? BP : BR, pts, SHOP_H, h, tint, BAY, 4, FLOOR, 4, k, 0.94);
       } else {
         addWalls(hash(k * 3) < 0.5 ? BP : BR, pts, 0, h, tint, BAY, 4, FLOOR, 4, k, 0.74);
@@ -781,7 +895,7 @@ const SCENERY = (() => {
     const off = (s, o) => [s.x - s.tz * o, s.z + s.tx * o];
     const BROAD = buf(), BPLAZA = buf(), BMARK = buf(), BGREEN = buf(), BFENCE = buf();
     const kindAt = (x, z) => { const c = Math.floor(x / cell), r = Math.floor(z / cell); return r < 0 || c < 0 || r >= n || c >= n ? -1 : map.kind[r * n + c]; };
-    const WHITE = lin("#e9e7e1"), YELLOW = lin("#e8b828"), CURB = lin("#cfcbc3");
+    const WHITE = lin("#e9e7e1"), YELLOW = lin("#e8b828");
     const treeSpots = [], lampSpots = [];
     const fenceSegs = []; // 세운 울타리 [a, b] (덮은 비율 점검과 빈 곳 채우기에 쓴다)
     const FENCE_H = 1.2; // 보행자 방호 울타리 높이(m)
@@ -790,6 +904,29 @@ const SCENERY = (() => {
     const laneSegs = [];
     for (const rd of roads) if (rd.k === "car" && !rd.br && rd.w >= CONFIG.NO_SIDEWALK_BELOW && rd.w < CONFIG.WIDE_ROAD) for (let i = 0; i + 1 < rd.pts.length; i++) laneSegs.push({ a: rd.pts[i], b: rd.pts[i + 1], hw: rd.w / 2 });
     const onLaneRoad = (x, z) => laneSegs.some((sg) => segDist2(x, z, sg.a, sg.b) < (sg.hw + 0.5) ** 2);
+    // 길바닥 장식 (2026-10-21): 화강석 연석, 노란 점자블록(선형·점형), 골목 가장자리 선과 색 포장, 가로수 보호판
+    const BCURB = buf(), BTACT = buf(), BDOT = buf(), BSTAMP = buf(), BGRATE = buf();
+    const roadTrees = []; // 길가 가로수 자리 { x, z, yaw } (보호판을 깐다)
+    // 길을 따라 깔리는 띠: 가운데가 길 중심선에서 o만큼 옆, 폭 width. u는 폭 방향(uLen m마다 1), v는 길이 방향(vLen m마다 1)
+    function ribbon(B, S, o, width, y, uLen, vLen, test) {
+      for (let i = 0; i < S.length - 1; i++) {
+        const s = S[i], t = S[i + 1];
+        if (!s.ok || !t.ok) continue;
+        if (test && !(test(off(s, o)) && test(off(t, o)))) continue;
+        const A = off(s, o - width / 2), Bq = off(t, o - width / 2), C = off(t, o + width / 2), D = off(s, o + width / 2);
+        upQuad(B, [[A[0], A[1], 0, s.d / vLen], [Bq[0], Bq[1], 0, t.d / vLen], [C[0], C[1], width / uLen, t.d / vLen], [D[0], D[1], width / uLen, s.d / vLen]], y, ONE);
+      }
+    }
+    // 연석: 차도 가장자리에 폭 0.3m, 윗면 높이 0.09m의 화강석 띠. 윗면과 양쪽 옆면
+    function curb(S, side, hw) {
+      ribbon(BCURB, S, side * (hw + 0.1), 0.3, 0.09, 0.3, 2);
+      for (let i = 0; i < S.length - 1; i++) {
+        const s = S[i], t = S[i + 1];
+        if (!s.ok || !t.ok) continue;
+        for (const e of [hw - 0.05, hw + 0.25]) vquad(BCURB, off(s, side * e), off(t, side * e), 0, 0.09, s.d / 2, t.d / 2, ONE);
+      }
+    }
+    const walkAt = (p) => kindAt(p[0], p[1]) === 2;
     function strip(S, o, width, y, col, dash) {
       for (let i = 0; i < S.length - 1; i++) {
         const s = S[i], t = S[i + 1];
@@ -887,10 +1024,19 @@ const SCENERY = (() => {
           triUp(B, p, [p[0] + Math.cos(a0) * hw, p[1] + Math.sin(a0) * hw], [p[0] + Math.cos(a1) * hw, p[1] + Math.sin(a1) * hw], y, s, ONE);
         }
       }
-      if (plaza || bare) continue;
+      if (plaza) continue;
+      if (bare) {
+        // 인도 없는 골목: 대부분은 양쪽 가장자리에 흰 실선(보행 공간), 다섯에 하나는 보행자 우선도로처럼 색 네모 포장
+        const S = sample(rd, 2);
+        if (hash(rd.pts[0][0] * 13.1 + rd.pts[0][1] * 7.7) < 0.2) ribbon(BSTAMP, S, 0, hw * 2 - 0.6, y + 0.004, 2, 2);
+        else for (const side of [-1, 1]) strip(S, side * (hw - 0.6), 0.12, y + 0.006, WHITE, false);
+        continue;
+      }
       const S = sample(rd, 2);
-      strip(S, -hw, 0.35, ROAD_LAYER + 0.025, CURB, false);
-      strip(S, hw, 0.35, ROAD_LAYER + 0.025, CURB, false);
+      curb(S, -1, hw);
+      curb(S, 1, hw);
+      // 큰길 보도: 보도 가운데쯤에 노란 선형 점자블록 한 줄 (보도 위인 곳만)
+      if (rd.w >= CONFIG.WIDE_ROAD) { const sw = rd.sw || 4; for (const side of [-1, 1]) ribbon(BTACT, S, side * (hw + sw * 0.6), 0.3, 0.015, 0.3, 0.3, walkAt); }
       if (rd.w < 10) continue;
       // 한국 도로: 가운데 노란 겹선, 차로 사이 흰 점선, 교차로 앞 횡단보도
       strip(S, -0.2, 0.15, ROAD_LAYER + 0.03, YELLOW, false);
@@ -932,7 +1078,9 @@ const SCENERY = (() => {
       sample(rd, 9).forEach((sp, k) => {
         if (!sp.ok) return;
         for (const side of [-1, 1]) {
-          treeSpots.push(off(sp, side * (hw + 1.6)));
+          const tp = off(sp, side * (hw + 1.6));
+          treeSpots.push(tp);
+          roadTrees.push({ x: tp[0], z: tp[1], yaw: Math.atan2(sp.tx, sp.tz) });
           if (k % 3 === (side > 0 ? 0 : 1)) lampSpots.push({ p: off(sp, side * (hw + 0.5)), yaw: Math.atan2(sp.tx, sp.tz) + (side > 0 ? Math.PI : 0) });
         }
       });
@@ -1022,7 +1170,7 @@ const SCENERY = (() => {
       const h = floors * FLOOR + 0.6;
       const tint = lin(WALL_TINTS[Math.floor(hash(k * 2.7) * WALL_TINTS.length)]);
       if (nearRoad(cx, cz, 8) && floors <= 5) {
-        addWalls(BS, pts, 0, SHOP_H, ONE, 4, 4, SHOP_H, 1, k, 0.78);
+        addWalls(BS, pts, 0, SHOP_H, ONE, 4, 8, SHOP_H, 1, k, 0.78);
         addWalls(hash(k * 3) < 0.5 ? BP : BR, pts, SHOP_H, h, tint, BAY, 4, FLOOR, 4, k, 0.94);
       } else {
         addWalls(hash(k * 3) < 0.5 ? BP : BR, pts, 0, h, tint, BAY, 4, FLOOR, 4, k, 0.74);
@@ -1111,6 +1259,67 @@ const SCENERY = (() => {
     group.add(toMesh(BS, std(T.shop, { roughness: 0.6 }), true));
     group.add(toMesh(BROOF, std(T.roof, { roughness: 1 }), true));
     group.add(toMesh(BBRICK, std(T.brick), true));
+    group.add(toMesh(BVILLA, std(T.villa), true), toMesh(BPIL, std(T.piloti, { roughness: 1 }), true));
+    // 세로 돌출 간판: 벽에 직각으로 0.9m 튀어나온 판. 글자는 업종 이름 16가지를 한 장(1024×512, 칸 64×512)에 모아 그린다
+    if (vsigns.length) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1024; canvas.height = 512;
+      const g = canvas.getContext("2d");
+      VERT_WORDS.forEach((word, k) => {
+        const x = k * 64, c = SIGN_COLORS[Math.floor(hash(k * 5.3 + 7) * SIGN_COLORS.length)];
+        g.fillStyle = c; g.fillRect(x, 0, 64, 512);
+        g.fillStyle = "rgba(255,255,255,0.85)"; g.fillRect(x + 4, 4, 56, 4); g.fillRect(x + 4, 504, 56, 4);
+        g.fillStyle = c === "#f4f1ea" || c === "#f2c230" ? "#1b1b1b" : "#fbfaf6";
+        g.font = "bold 46px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
+        g.textAlign = "center"; g.textBaseline = "middle";
+        const chars = [...word.replace("PC", "Ⓟ")].map((ch) => (ch === "Ⓟ" ? "PC" : ch)), step = Math.min(64, 440 / chars.length);
+        chars.forEach((ch, j) => { g.font = `bold ${ch.length > 1 ? 30 : 46}px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif`; g.fillText(ch, x + 32, 256 + (j - (chars.length - 1) / 2) * step); });
+      });
+      const vtex = new THREE.CanvasTexture(canvas);
+      vtex.encoding = THREE.sRGBEncoding; vtex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      for (const v of vsigns) {
+        const dx = (v.p1[0] - v.p0[0]) / v.len, dz = (v.p1[1] - v.p0[1]) / v.len, nx = dz, nz = -dx; // 바깥 법선 (dz, -dx)
+        const t = 0.6 + hash(v.k * 1.9) * Math.max(0, v.len - 1.8), bx = v.p0[0] + dx * t, bz = v.p0[1] + dz * t;
+        const A = [bx + nx * 0.1, bz + nz * 0.1], Bq = [bx + nx * 1.0, bz + nz * 1.0];
+        const slot = Math.floor(hash(v.k * 3.3) * VERT_WORDS.length), u0 = slot / 16, u1 = (slot + 1) / 16;
+        const fx = dx, fz = dz; // 판의 법선은 벽 방향
+        const put = (p, y, u, vv) => vtx(BVSIGN, p[0], y, p[1], fx, 0, fz, u, vv, ONE);
+        put(A, v.y0, u0, 0); put(Bq, v.y0, u1, 0); put(Bq, v.y1, u1, 1);
+        put(A, v.y0, u0, 0); put(Bq, v.y1, u1, 1); put(A, v.y1, u0, 1);
+      }
+      group.add(toMesh(BVSIGN, new THREE.MeshStandardMaterial({ map: vtex, vertexColors: true, side: THREE.DoubleSide, roughness: 0.5, emissive: 0x222222 }), true));
+    }
+    // 옥상 물탱크(하늘색·흰색 FRP 원통)와 실외기(흰 상자). 같은 모양을 여러 번 그린다(InstancedMesh)
+    {
+      const tanks = [], acs = [];
+      for (const r of roofSpots) {
+        const inside = (x, z) => pointInPoly(x, z, r.pts);
+        const cx = r.pts.reduce((a, p) => a + p[0], 0) / r.pts.length, cz = r.pts.reduce((a, p) => a + p[1], 0) / r.pts.length;
+        if (hash(r.i * 1.31) < 0.55) {
+          const tx = cx + (hash(r.i * 2.7) - 0.5) * (r.maxx - r.minx) * 0.4, tz = cz + (hash(r.i * 3.9) - 0.5) * (r.maxz - r.minz) * 0.4;
+          if (inside(tx, tz) && inside(tx + 0.8, tz) && inside(tx - 0.8, tz) && inside(tx, tz + 0.8) && inside(tx, tz - 0.8)) tanks.push([tx, r.h, tz, hash(r.i * 5.1) < 0.6]);
+        }
+        const n = Math.floor(hash(r.i * 6.3) * 3);
+        for (let k = 0; k < n; k++) {
+          const ax = r.minx + (0.15 + hash(r.i * 7.1 + k) * 0.7) * (r.maxx - r.minx), az = r.minz + (0.15 + hash(r.i * 8.3 + k) * 0.7) * (r.maxz - r.minz);
+          if (inside(ax, az) && inside(ax + 0.6, az + 0.6) && inside(ax - 0.6, az - 0.6)) acs.push([ax, r.h, az, hash(r.i + k * 4.4) * Math.PI]);
+        }
+      }
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+      if (tanks.length) {
+        const geo = new THREE.CylinderGeometry(0.75, 0.75, 1.6, 12); geo.translate(0, 0.8, 0);
+        const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 }), tanks.length);
+        tanks.forEach(([x, y, z, blue], k) => { im.setMatrixAt(k, m4.compose(new THREE.Vector3(x, y, z), q.identity(), one)); im.setColorAt(k, lin(blue ? "#9fc7d9" : "#eeeeea")); });
+        im.castShadow = im.receiveShadow = true; group.add(im);
+      }
+      if (acs.length) {
+        const geo = new THREE.BoxGeometry(0.9, 0.75, 0.42); geo.translate(0, 0.375, 0);
+        const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: lin("#e6e6e1"), roughness: 0.6 }), acs.length);
+        acs.forEach(([x, y, z, yaw], k) => im.setMatrixAt(k, m4.compose(new THREE.Vector3(x, y, z), q.setFromAxisAngle(up, yaw), one)));
+        im.castShadow = im.receiveShadow = true; group.add(im);
+      }
+      roofStats.tanks = tanks.length; roofStats.acs = acs.length;
+    }
     group.add(toMesh(BBLOCK, std(T.block), true));
     group.add(toMesh(BMETAL, std(T.metal, { roughness: 0.6, metalness: 0.15 }), true));
     group.add(toMesh(BAPT, std(T.apt), true));
@@ -1197,6 +1406,19 @@ const SCENERY = (() => {
       }
     }
     group.add(toMesh(BFENCE, std(T.fence, { side: THREE.DoubleSide, alphaTest: 0.5, roughness: 0.6 }), true));
+    // 횡단보도 앞 노란 점형 블록: 연석 바로 뒤 보도에 길이 3m × 폭 0.6m (보도 위인 곳만)
+    for (const c of crossings) {
+      const nx = -c.tz, nz = c.tx;
+      for (const side of [-1, 1]) {
+        const cx = c.x + nx * side * (c.w / 2 + 0.75), cz = c.z + nz * side * (c.w / 2 + 0.75);
+        if (kindAt(cx, cz) !== 2) continue;
+        const P = (a, b) => [cx + c.tx * a + nx * b, cz + c.tz * a + nz * b];
+        upQuad(BDOT, [[...P(-1.5, -0.3), 0, 0], [...P(1.5, -0.3), 10, 0], [...P(1.5, 0.3), 10, 2], [...P(-1.5, 0.3), 0, 2]], 0.016, ONE);
+      }
+    }
+    const deco = (map) => std(map, { side: THREE.DoubleSide, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    group.add(toMesh(BCURB, std(T.curb, { side: THREE.DoubleSide, roughness: 0.8 })));
+    group.add(toMesh(BTACT, deco(T.tactLine)), toMesh(BDOT, deco(T.tactDot)), toMesh(BSTAMP, deco(T.stamp)));
     if (map.underpass) drawUnderpass(group, map.underpass, solids, renderer.capabilities.getMaxAnisotropy());
 
     // ---------- 신호등 ----------
@@ -1310,6 +1532,17 @@ const SCENERY = (() => {
       return Math.hypot(ax - x, az - z) < (t1 - t0) / 2 + 3;
     });
     const trees = treeSpots.filter(([x, z]) => x > -250 && z > -250 && x < size + 250 && z < size + 250 && okSpot(x, z) && !nearExit(x, z));
+    // 길가 가로수 밑에 철제 보호판 (1.2m, 길 방향으로 돌린다). 심은 나무만
+    {
+      const kept = new Set(trees.map(([x, z]) => x.toFixed(2) + "," + z.toFixed(2)));
+      for (const t of roadTrees) {
+        if (!kept.has(t.x.toFixed(2) + "," + t.z.toFixed(2))) continue;
+        const ux = Math.sin(t.yaw) * 0.6, uz = Math.cos(t.yaw) * 0.6, vx = -uz, vz = ux;
+        upQuad(BGRATE, [[t.x - ux - vx, t.z - uz - vz, 0, 0], [t.x + ux - vx, t.z + uz - vz, 1, 0], [t.x + ux + vx, t.z + uz + vz, 1, 1], [t.x - ux + vx, t.z - uz + vz, 0, 1]], 0.018, ONE);
+      }
+      T.grate.wrapS = T.grate.wrapT = THREE.ClampToEdgeWrapping; T.grate.needsUpdate = true;
+      group.add(toMesh(BGRATE, std(T.grate, { side: THREE.DoubleSide, roughness: 0.6, metalness: 0.3, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+    }
     const obstacles = makeIndex(8);
     for (const [x, z] of pillarSpots) obstacles.add(x - 0.9, z - 0.9, x + 0.9, z + 0.9, { x, z, r: 0.9 });
     const rampIdx = makeIndex(12);
@@ -1407,7 +1640,7 @@ const SCENERY = (() => {
       }
       return { list: () => fenceSegs.map((q) => [q[0][0], q[0][1], q[1][0], q[1][1], q.rd || 0]), segs: fenceSegs.length, filled: fenceFill, edges, covered, pct: edges ? +(covered / edges * 100).toFixed(1) : 100, gaps };
     }
-    return { group, hits, tick, nearEdge, fenceStats, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, trees: trees.length, treeModels: !!treeLod, exits: exits.length, props: props && props.counts }, treeStats: () => (treeLod ? treeLod.stats() : null),
+    return { group, hits, tick, nearEdge, fenceStats, edgeBand: EDGE_BAND, roads, crossings, signalOf, kindAt, deckY, stats: { buildings: polys.length, villas: BVILLA.p.length / 18, vsigns: vsigns.length, roof: roofStats, trees: trees.length, treeModels: !!treeLod, exits: exits.length, props: props && props.counts }, treeStats: () => (treeLod ? treeLod.stats() : null),
       exits: exits.map(({ e, t0, t1 }) => { const [x, z] = e.along((t0 + t1) / 2); return { x, z, inward: e.inward, width: t1 - t0 }; }) };
   }
 
