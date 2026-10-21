@@ -3,10 +3,22 @@
 
 const TEST_MODE = new URLSearchParams(location.search).get("test") === "1";
 
-let _renderer = null;
+// 로그 깊이 버퍼는 쓰지 않는다: 화면 점마다 깊이를 직접 써서 그래픽 카드가 가려진 점을 미리 거르지 못해 무거웠다
+// (2026-10-21 반월당 보통 품질 29 → 37fps). 대신 카메라 가까운 면을 0.3m로 두어 깊이 정밀도를 보완한다.
+// 안티에일리어싱은 품질 높음에만 켠다(보통에서 끄면 +14%). 화면을 만든 뒤에는 바꿀 수 없어서, 달라지면 캔버스를 새로 만든다
+let _renderer = null, _rendererAA = null;
 function getRenderer(canvas) {
+  const aa = !!QUALITY_PRESETS[CONFIG.QUALITY].antialias;
+  if (_renderer && _rendererAA !== aa) {
+    const fresh = canvas.cloneNode(false);
+    canvas.replaceWith(fresh);
+    _renderer.dispose();
+    _renderer = null;
+    canvas = fresh;
+  }
   if (!_renderer) {
-    _renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
+    _renderer = new THREE.WebGLRenderer({ canvas, antialias: aa });
+    _rendererAA = aa;
   }
   _renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY_PRESETS[CONFIG.QUALITY].pixelRatio)); // 판마다 품질 설정을 따른다
   _renderer.setSize(window.innerWidth, window.innerHeight);
@@ -15,11 +27,13 @@ function getRenderer(canvas) {
 
 // spec: { canvas, overlayEl, timerEl, hudEl, map, route, landmarks, soundscape, withSound }
 function runRound(spec, onComplete) {
-  const { canvas, overlayEl, timerEl, hudEl, map, route, landmarks, soundscape, withSound } = spec;
-  const renderer = getRenderer(canvas);
+  const { overlayEl, timerEl, hudEl, map, route, landmarks, soundscape, withSound } = spec;
+  const renderer = getRenderer(spec.canvas.isConnected ? spec.canvas : document.getElementById("game-canvas"));
+  const canvas = renderer.domElement; // 품질을 바꿔 캔버스를 새로 만들었을 수 있다
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.2, CONFIG.FOG_FAR + 400);
+  // 안개가 FOG_FAR에서 완전히 가리므로 그 조금 뒤까지만 그린다 (예전에는 +400m까지 보이지 않는 것을 그렸다)
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.3, CONFIG.FOG_FAR + 40);
   const updateSky = SCENERY.atmosphere(scene, renderer, camera);
   const scenery = SCENERY.build(scene, renderer, map, [route.startPos, route.goalPos]);
   const traffic = TRAFFIC.create(scene, map, scenery);
@@ -161,6 +175,7 @@ function runRound(spec, onComplete) {
   window.addEventListener("resize", onResize);
 
   let started = false, finished = false, paused = false;
+  let velX = 0, velZ = 0; // 플레이어 이동 속도(m/s)
   let startTime = 0, pauseStartedAt = 0, distance = 0;
 
   const msgEl = overlayEl.querySelector("[data-msg]");
@@ -257,8 +272,10 @@ function runRound(spec, onComplete) {
   // 1 아래로는 낮추지 않는다(0.75는 화면이 흐려진다). 그래도 느리면 품질 낮음을 고른다
   const prMax = renderer.getPixelRatio(), prMin = Math.min(prMax, 1);
   let pixelRatio = prMax, lowRun = 0, highRun = 0, warmup = 3;
+  // 판 도중에 배율을 바꾸면 화면이 순간 흐려지거나 선명해지고 그 프레임이 멈칫해서, 출발 전 화면과 출발 뒤 8초 동안만 조절한다 (2026-10-21)
   function adaptResolution(fps) {
     if (warmup > 0) { warmup--; return; } // 시작 직후(불러오기·그림자 첫 계산)는 건너뛴다
+    if (started && performance.now() - startTime > 8000) return;
     if (fps < 40) { highRun = 0; if (++lowRun >= 2 && pixelRatio > prMin) { pixelRatio = Math.max(prMin, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); lowRun = 0; } }
     else if (fps > 55) { lowRun = 0; if (++highRun >= 4 && pixelRatio < prMax) { pixelRatio = Math.min(prMax, pixelRatio + 0.25); renderer.setPixelRatio(pixelRatio); highRun = 0; } }
     else lowRun = highRun = 0;
@@ -321,23 +338,40 @@ function runRound(spec, onComplete) {
       if (keys.KeyS || keys.ArrowDown) { dx -= fx; dz -= fz; }
       if (keys.KeyA) { dx -= rx; dz -= rz; }
       if (keys.KeyD) { dx += rx; dz += rz; }
-      if (keys.ArrowLeft) yaw += 1.8 * dt;
-      if (keys.ArrowRight) yaw -= 1.8 * dt;
+      if (keys.ArrowLeft) yaw += 2.6 * dt;
+      if (keys.ArrowRight) yaw -= 2.6 * dt;
       const len = Math.hypot(dx, dz);
-      if (upChoice || upBusy) { /* 지하도에서 출구를 고르는 중에는 움직이지 않는다 */ }
-      else if (len > 0) {
-        dx = (dx / len) * speed * dt;
-        dz = (dz / len) * speed * dt;
+      // 속도는 목표 속도로 짧게 따라간다 (출발 약 0.08초, 멈춤 약 0.06초). 예전에는 키를 누르면 바로 최고 속도, 떼면 바로 멈춰 뻑뻑했다
+      const goX = len > 0 && !upChoice && !upBusy ? (dx / len) * speed : 0, goZ = len > 0 && !upChoice && !upBusy ? (dz / len) * speed : 0;
+      const ease = 1 - Math.exp(-dt / (len > 0 ? 0.08 : 0.06));
+      velX += (goX - velX) * ease; velZ += (goZ - velZ) * ease;
+      if (Math.hypot(velX, velZ) < 0.05 && len === 0) velX = velZ = 0;
+      if (upChoice || upBusy) { velX = velZ = 0; /* 지하도에서 출구를 고르는 중에는 움직이지 않는다 */ }
+      else if (velX || velZ) {
+        dx = velX * dt;
+        dz = velZ * dt;
         const cx = camera.position.x, cz = camera.position.z;
         let nx = cx, nz = cz;
-        if (canStandAt(cx + dx, cz)) nx = cx + dx;
-        if (canStandAt(nx, cz + dz)) nz = cz + dz;
+        if (canStandAt(cx + dx, cz + dz)) { nx = cx + dx; nz = cz + dz; }
+        else {
+          // 막히면 벽을 따라 미끄러진다: 축 하나씩, 그래도 막히면 30·60도 돌린 방향으로 그만큼 짧게
+          if (canStandAt(cx + dx, cz)) nx = cx + dx;
+          if (canStandAt(nx, cz + dz)) nz = cz + dz;
+          if (nx === cx && nz === cz) {
+            for (const a of [0.52, -0.52, 1.05, -1.05]) {
+              const c = Math.cos(a), sn = Math.sin(a), sx = (dx * c - dz * sn) * c, sz = (dx * sn + dz * c) * c;
+              if (canStandAt(cx + sx, cz + sz)) { nx = cx + sx; nz = cz + sz; break; }
+            }
+          }
+          // 막힌 쪽 속도는 버린다 (벽에서 떨어질 때 튀어 나가지 않게)
+          if (dt > 0) { velX = (nx - cx) / dt; velZ = (nz - cz) / dt; }
+        }
         distance += Math.hypot(nx - cx, nz - cz);
         // 가림막에 막혀 거의 못 움직였으면 안내 문구를 잠깐 띄운다
         if (Math.hypot(nx - cx, nz - cz) < Math.hypot(dx, dz) * 0.3 && scenery.nearEdge(cx, cz)) showToast();
         camera.position.x = nx;
         camera.position.z = nz;
-        if (keys.KeyW || keys.ArrowUp) { const i = underpassAt(nx, nz); if (i >= 0) openUnderpass(i); }
+        if (len > 0 && (keys.KeyW || keys.ArrowUp)) { const i = underpassAt(nx, nz); if (i >= 0) openUnderpass(i); }
       }
       if (withSound) soundscape.updateListener(camera);
 

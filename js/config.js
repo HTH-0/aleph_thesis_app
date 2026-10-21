@@ -47,12 +47,12 @@ const CONFIG = {
 };
 
 // 그래픽 품질. 소리와 길찾기 조건은 바꾸지 않고 화면 부담만 바꾼다 (행인·차량은 소리를 내지 않는다).
-// pixelRatio: 화면 해상도 배율 상한, shadowMap: 그림자 지도 크기(0이면 그림자 없음), people·cars: 행인·차량 수.
+// pixelRatio: 화면 해상도 배율 상한, shadowMap: 그림자 지도 크기(0이면 그림자 없음), people·cars: 행인·차량 수, antialias: 계단 현상 줄이기(무거워서 높음만).
 // 거리 소품 수는 js/streetprops.js가 QUALITY에 맞춰 줄이거나 늘린다(낮음 0.4배, 높음 1.3배).
 const QUALITY_PRESETS = {
-  low:    { label: "낮음", pixelRatio: 1,    shadowMap: 0,    people: 25, cars: 10 },
-  medium: { label: "보통", pixelRatio: 1.75, shadowMap: 2048, people: 60, cars: 18 },
-  high:   { label: "높음", pixelRatio: 2,    shadowMap: 4096, people: 80, cars: 25 },
+  low:    { label: "낮음", pixelRatio: 1,    shadowMap: 0,    people: 25, cars: 10, antialias: false },
+  medium: { label: "보통", pixelRatio: 1.75, shadowMap: 2048, people: 60, cars: 18, antialias: false },
+  high:   { label: "높음", pixelRatio: 2,    shadowMap: 4096, people: 80, cars: 25, antialias: true },
 };
 function setQuality(q) {
   const p = QUALITY_PRESETS[q] || QUALITY_PRESETS.medium;
