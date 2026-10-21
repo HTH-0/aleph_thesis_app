@@ -658,7 +658,13 @@ const SCENERY = (() => {
     const bldList = []; // 거리 소품 배치용 건물 { pts, h, shop }
     // 외벽: 공공데이터의 구조(st)와 사용승인 연도(y)가 있으면 그것으로, 없으면 무작위로 고른다
     //  아파트 → 발코니 벽, 목조 저층 → 회벽 + 기와 우진각 지붕, 벽돌 → 붉은 벽돌, 블록·석조 → 회색 블록, 저층 철골 → 골함석 패널
+    // 상징 건물(js/landmarks.js): 일반 상자 대신 따로 그리거나(replace), 그대로 그리고 간판을 더하거나(decorate), 숨긴다(hide)
+    const lmPlan = typeof LANDMARKS !== "undefined" ? LANDMARKS.plan(map, sc.buildings, pointInPoly) : null;
+    const lmBuilt = [], roofPolys = [];
     sc.buildings.forEach((b, i) => {
+      const sp = lmPlan && lmPlan.get(i);
+      if (sp && sp.role === "hide") return;
+      if (sp && sp.role === "decorate") lmBuilt.push({ sp, pts: orient(b.p).pts, h: b.h, b });
       const { pts, area } = orient(b.p);
       const r = hash(i * 7.77);
       const isRoof = b.k === "roof", isChurch = b.k === "church", isLow = b.k === "low", isApt = b.k === "apartments", isWood = b.k === "wood";
@@ -669,6 +675,7 @@ const SCENERY = (() => {
       // 거리 소품(js/streetprops.js) 배치에 쓴다: 벽에 실외기, 1층 상가에 셔터
       if (!isRoof) bldList.push({ pts, h, shop: !isApt && !isWood && !isLow && !isChurch && area > 40 && h > SHOP_H + 2 });
       if (isRoof) {
+        roofPolys.push(pts); // 시장 아케이드처럼 지붕만 있는 곳 밑에는 나무를 심지 않는다
         addWalls(BROOF, pts, 3.4, h, lin("#9b9d9f"), BAY, 4, FLOOR, 4, i, 1);
       } else {
         const minx = Math.min(...pts.map((p) => p[0])), maxx = Math.max(...pts.map((p) => p[0]));
@@ -677,6 +684,7 @@ const SCENERY = (() => {
         const poly = { pts, minx, maxx, minz, maxz, i, res: !isApt && !isChurch && (isLow || isWood || b.st === "b" || b.st === "k" || h <= 16) };
         polys.push(poly);
         solids.add(minx, minz, maxx, maxz, poly);
+        if (sp && sp.role === "replace") { lmBuilt.push({ sp, pts, h, b }); return; }
         if (isApt) {
           // 판상형 아파트(긴 벽이 짧은 벽의 2배 이상)는 짧은 벽 두 개를 창 없는 옆벽(측벽)으로 그리고, 동 번호가 있으면 거기에 쓴다
           const edges = pts.map((a, j) => { const q = pts[(j + 1) % pts.length]; return { j, a, q, len: Math.hypot(q[0] - a[0], q[1] - a[1]) }; });
@@ -1260,6 +1268,7 @@ const SCENERY = (() => {
     group.add(toMesh(BROOF, std(T.roof, { roughness: 1 }), true));
     group.add(toMesh(BBRICK, std(T.brick), true));
     group.add(toMesh(BVILLA, std(T.villa), true), toMesh(BPIL, std(T.piloti, { roughness: 1 }), true));
+    const lmTick = lmPlan ? LANDMARKS.build({ group, map, built: lmBuilt, pillarSpots, buf, toMesh, std, T, addWalls, polyUp, orient, vtx, lin, ONE, renderer, hash, canvasTex, BAY, FLOOR }) : null;
     // 세로 돌출 간판: 벽에 직각으로 0.9m 튀어나온 판. 글자는 업종 이름 16가지를 한 장(1024×512, 칸 64×512)에 모아 그린다
     if (vsigns.length) {
       const canvas = document.createElement("canvas");
@@ -1525,7 +1534,7 @@ const SCENERY = (() => {
     const onCarway = (x, z) => roadIdx.at(x, z).some((s) => s.car && segDist2(x, z, s.a, s.b) < (s.pad - 4.7) ** 2);
     const okSpot = (x, z) => {
       const k = cellKind(x, z);
-      return (k === 2 || k === -1) && !insideSolid(x, z) && clearOf(x, z) && !onCarway(x, z);
+      return (k === 2 || k === -1) && !insideSolid(x, z) && clearOf(x, z) && !onCarway(x, z) && !roofPolys.some((p) => pointInPoly(x, z, p));
     };
     const nearExit = (x, z) => exits.some(({ e, t0, t1 }) => {
       const [ax, az] = e.along((t0 + t1) / 2);
@@ -1617,6 +1626,7 @@ const SCENERY = (() => {
       lampMat.emissiveIntensity = Math.sin(now * 0.004) > 0 ? 1.8 : 0.15;
       updateSignals(now / 1000);
       if (treeLod && cam && treeLod.update(cam.x, cam.z)) renderer.shadowMap.needsUpdate = true;
+      if (lmTick && cam) lmTick(cam);
     }
     // 가장자리 가림막 앞인지 (안내 문구를 띄울 때 쓴다)
     const nearEdge = (x, z) => x < EDGE_BAND + 1.2 || z < EDGE_BAND + 1.2 || x > size - EDGE_BAND - 1.2 || z > size - EDGE_BAND - 1.2;

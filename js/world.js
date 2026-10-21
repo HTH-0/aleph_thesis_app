@@ -34,6 +34,12 @@ async function loadRegion(id) {
     const all = r.ok ? await r.json() : {};
     if (all[id]) map.underpass = placeUnderpass(map, all[id]);
   } catch (e) { /* 지하도 없이 진행한다 */ }
+  // 고가 모노레일 (data/rail.json, js/landmarks.js가 그린다)
+  try {
+    const r = await fetch("data/rail.json");
+    const all = r.ok ? await r.json() : {};
+    if (all[id]) map.rail = all[id];
+  } catch (e) { /* 선로 없이 진행한다 */ }
   return map;
 }
 
