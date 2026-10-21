@@ -24,6 +24,24 @@ function runRound(spec, onComplete) {
   const scenery = SCENERY.build(scene, renderer, map, [route.startPos, route.goalPos]);
   const traffic = TRAFFIC.create(scene, map, scenery);
 
+  // 셰이더와 텍스처를 판 시작 전에 미리 만든다. 브라우저는 물체가 처음 화면에 들어올 때 만들어서,
+  // 판 도중 지역당 1~2번 0.1~0.2초씩 멈췄다 (2026-10-21 측정). 숨겨 둔 물체(쉬는 행인 등)도 잠시 보이게 해서 함께 만든다
+  function warmUp() {
+    const hidden = [];
+    scene.traverse((o) => { if (!o.visible) { hidden.push(o); o.visible = true; } });
+    renderer.compile(scene, camera);
+    if (renderer.initTexture) {
+      const seen = new Set();
+      scene.traverse((o) => {
+        for (const m of [].concat(o.material || [])) for (const k of ["map", "normalMap", "roughnessMap", "metalnessMap", "emissiveMap", "alphaMap", "aoMap"]) {
+          const t = m[k];
+          if (t && !seen.has(t)) { seen.add(t); renderer.initTexture(t); }
+        }
+      });
+    }
+    for (const o of hidden) o.visible = false;
+  }
+
   // 목적지: 안개 안으로 들어와야 보이는 금색 기둥
   const goal = route.goalPos;
   const pillar = new THREE.Mesh(
@@ -39,6 +57,7 @@ function runRound(spec, onComplete) {
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(goal.x, 0.05, goal.z);
   scene.add(ring);
+  warmUp(); // 목적지 기둥까지 장면에 넣은 뒤
 
   camera.position.set(route.startPos.x, CONFIG.EYE_HEIGHT, route.startPos.z);
   // 처음에는 목적지 쪽이 아니라 걸을 수 있는 방향 중 하나를 보게 한다
@@ -217,7 +236,7 @@ function runRound(spec, onComplete) {
       view(x, z, h, y, p) { camera.position.set(x, h, z); yaw = y; pitch = p; },
       pos() { return { x: camera.position.x.toFixed(1), z: camera.position.z.toFixed(1), yaw: yaw.toFixed(2) }; },
       // 마지막 프레임의 그리기 호출 수와 삼각형 수 (fps가 60에서 막힐 때 무게를 비교하려고)
-      perf() { return { fps: fpsText, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, pixelRatio: renderer.getPixelRatio() }; },
+      perf() { return { fps: fpsText, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, pixelRatio: renderer.getPixelRatio(), programs: renderer.info.programs.length }; },
     };
   }
 
